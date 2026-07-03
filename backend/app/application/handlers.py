@@ -3,6 +3,7 @@ import os
 import platform
 import subprocess
 import sys
+import time
 from datetime import datetime
 from typing import Any, Dict, List
 
@@ -27,6 +28,7 @@ from app.application.queries import (
     GetVersionQuery
 )
 from app.domain.interfaces import IEventBus
+from app.infrastructure.database import async_engine
 from app.infrastructure.database.models import JobModel, ApplicationModel
 
 logger = logging.getLogger("app.application.handlers")
@@ -139,12 +141,8 @@ class GetSystemInfoUseCase:
             redis_ver = "unknown"
 
         # 5. Playwright version
-        try:
-            import playwright
-            # Get version from packaging metadata or package itself
-            playwright_ver = "1.42.0"  # standard requirement package target version
-        except ImportError:
-            playwright_ver = "missing"
+        details = self.playwright_verifier.get_details()
+        playwright_ver = details.get("version", "N/A")
 
         # 6. Git metadata
         try:
@@ -204,10 +202,8 @@ class GetConfigurationDetailsUseCase:
         if exp is None:
             exp = career.get("experience")
             
-        try:
-            exp_float = float(exp) if exp is not None else 0.0
-        except ValueError:
-            exp_float = 0.0
+        from app.infrastructure.config.yaml_loader import parse_experience_years
+        exp_float = parse_experience_years(exp)
 
         skills = career.get("skills", [])
         if isinstance(skills, dict):
@@ -227,17 +223,53 @@ class GetConfigurationDetailsUseCase:
         )
 
 class GetDashboardDataUseCase:
-    def __init__(self, health_use_case: HealthCheckUseCase, config_use_case: GetConfigurationDetailsUseCase, db_session: AsyncSession):
+    def __init__(self, health_use_case: HealthCheckUseCase, config_use_case: GetConfigurationDetailsUseCase, db_session: AsyncSession, resume_manager: Any):
         self.health_use_case = health_use_case
         self.config_use_case = config_use_case
         self.db_session = db_session
+        self.resume_manager = resume_manager
 
     async def execute(self, query: GetDashboardDataQuery) -> DashboardDTO:
-        """Assembles unified metrics, configuration snapshots, and operational health maps."""
-        # 1. Health checks
+        """Assembles unified metrics, configuration snapshots, and operational health maps with latencies."""
+        # 1. Run Health Checks
         health_status = await self.health_use_case.execute(HealthCheckQuery())
 
-        # 2. SQL counts
+        # 2. Database latency & connection pool details
+        db_start = time.time()
+        try:
+            await self.db_session.execute(text("SELECT 1"))
+            db_ms = round((time.time() - db_start) * 1000, 2)
+        except Exception:
+            db_ms = -1.0
+
+        # Connection Pool statistics
+        pool = async_engine.pool
+        pool_details = {
+            "active": pool.checkedout(),
+            "size": pool.size(),
+            "checked_in": pool.checkedin(),
+            "max": pool.size() + getattr(pool, "_max_overflow", 10)
+        }
+
+        # 3. Redis connection latency
+        redis_start = time.time()
+        try:
+            await self.health_use_case.event_bus.publish("health.ping", {"ping": "pong"})
+            redis_ms = round((time.time() - redis_start) * 1000, 2)
+        except Exception:
+            redis_ms = -1.0
+
+        # 4. OpenRouter verification & connectivity latency
+        openrouter_ms = await self.health_use_case.settings_verifier.get_latency()
+
+        # Compile latency mappings
+        latencies = {
+            "database_ms": db_ms,
+            "redis_ms": redis_ms,
+            "openrouter_ms": openrouter_ms
+        }
+
+        # 5. SQL database counts
         try:
             jobs_res = await self.db_session.execute(text("SELECT count(*) FROM jobs"))
             jobs_cnt = jobs_res.scalar() or 0
@@ -250,31 +282,44 @@ class GetDashboardDataUseCase:
         except Exception:
             apps_cnt = 0
 
-        # 3. Resume status (scan directory or return settings)
-        resumes_dir = "resumes"
+        # 6. Scan resumes folder
+        resumes = self.resume_manager.scan_resumes()
+        
+        # Check active resume attachments
+        master_resume = "N/A"
+        ats_resume = "N/A"
         has_resume = False
-        resume_version = "N/A"
-        if os.path.exists(resumes_dir):
-            files = [f for f in os.listdir(resumes_dir) if f.endswith(".pdf") or f.endswith(".docx")]
-            if files:
-                has_resume = True
-                resume_version = files[0]
+        
+        for res in resumes:
+            has_resume = True
+            if res.get("type") == "Portfolio Resume":
+                master_resume = res.get("filename")
+            elif res.get("type") == "ATS Resume":
+                ats_resume = res.get("filename")
 
         resume_status = {
             "loaded": has_resume,
-            "version": resume_version,
-            "portfolio": "https://althaf.dev"  # Portfolio placeholder links
+            "master": master_resume,
+            "ats": ats_resume,
+            "portfolio": "https://althafportfolio.site/"
         }
 
-        # 4. Configuration snapshot
+        # 7. Local configuration details
         config_details = await self.config_use_case.execute(GetConfigurationDetailsQuery())
+        
+        # Playwright executable details
+        playwright_details = self.health_use_case.playwright_verifier.get_details()
 
         return DashboardDTO(
             health=health_status,
             jobs_count=jobs_cnt,
             applications_count=apps_cnt,
             resume_status=resume_status,
-            configuration=config_details
+            configuration=config_details,
+            latencies=latencies,
+            database_pool=pool_details,
+            resumes=resumes,
+            playwright_details=playwright_details
         )
 
 class GetVersionUseCase:
@@ -286,7 +331,7 @@ class GetVersionUseCase:
             git_commit = "N/A"
 
         return VersionDTO(
-            version="0.3.0",
+            version="0.4.0", # Bumped version for Sprint 1.4 Integration
             build_date="2026-07-03",
             commit=git_commit
         )

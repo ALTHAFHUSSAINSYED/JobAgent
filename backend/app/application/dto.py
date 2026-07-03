@@ -38,6 +38,10 @@ class DashboardDTO(BaseModel):
     applications_count: int
     resume_status: Dict[str, Any]
     configuration: ConfigDetailDTO
+    latencies: Dict[str, float] = Field(default_factory=dict)
+    database_pool: Dict[str, Any] = Field(default_factory=dict)
+    resumes: List[Dict[str, Any]] = Field(default_factory=list)
+    playwright_details: Dict[str, Any] = Field(default_factory=dict)
 
 class VersionDTO(BaseModel):
     version: str

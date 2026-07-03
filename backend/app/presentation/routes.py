@@ -1,4 +1,7 @@
 import asyncio
+import json
+import logging
+import time
 from typing import List
 from fastapi import APIRouter, Depends, WebSocket, WebSocketDisconnect
 
@@ -15,6 +18,7 @@ from app.application.queries import (
     GetSystemInfoQuery,
     GetConfigurationDetailsQuery,
     GetDashboardDataQuery,
+    GetVersionQuery
 )
 from app.application.commands import ValidateConfigurationCommand
 from app.infrastructure.providers.dependencies import (
@@ -35,7 +39,21 @@ from app.application.handlers import (
 )
 from app.core.logging import active_connections, log_history
 
+logger = logging.getLogger("app.presentation.routes")
 router = APIRouter()
+
+# WebSocket connections tracking lists
+events_connections: List[WebSocket] = []
+
+async def broadcast_event(event_name: str, payload: dict):
+    """Broadcasts Redis Event Bus notifications to active WebSocket event subscribers."""
+    message = json.dumps({"event": event_name, "payload": payload})
+    for ws in list(events_connections):
+        try:
+            await ws.send_text(message)
+        except Exception:
+            if ws in events_connections:
+                events_connections.remove(ws)
 
 @router.get("/health", response_model=HealthStatusDTO, tags=["Health"])
 @router.get("/api/v1/health", response_model=HealthStatusDTO, tags=["Health"])
@@ -58,7 +76,7 @@ async def validate_configuration(
 async def get_dashboard(
     use_case: GetDashboardDataUseCase = Depends(get_dashboard_data_use_case)
 ):
-    """Fetches high level summary overview metrics and counts."""
+    """Fetches high level summary overview metrics, counts, and scanned resumes."""
     query = GetDashboardDataQuery()
     return await use_case.execute(query)
 
@@ -95,18 +113,14 @@ async def get_recent_logs():
 async def websocket_logs(websocket: WebSocket):
     """Live stream connection broadcast pipeline streaming JSON logs records to React terminal views."""
     await websocket.accept()
-    
-    # Establish local queue block
     queue = asyncio.Queue()
     active_connections.append(queue)
-    
     try:
-        # Populate history logs
+        # Re-push cached history logs
         for log_line in list(log_history):
             await websocket.send_text(log_line)
             
         while True:
-            # Yield new line messages
             log_line = await queue.get()
             await websocket.send_text(log_line)
     except WebSocketDisconnect:
@@ -114,3 +128,45 @@ async def websocket_logs(websocket: WebSocket):
     finally:
         if queue in active_connections:
             active_connections.remove(queue)
+
+@router.websocket("/api/v1/ws/events")
+async def websocket_events(websocket: WebSocket):
+    """Listens for custom backend system state and config change notifications."""
+    await websocket.accept()
+    events_connections.append(websocket)
+    try:
+        while True:
+            # Hold socket connection alive
+            await websocket.receive_text()
+    except WebSocketDisconnect:
+        pass
+    finally:
+        if websocket in events_connections:
+            events_connections.remove(websocket)
+
+@router.websocket("/api/v1/ws/system")
+async def websocket_system(
+    websocket: WebSocket,
+    use_case: GetSystemInfoUseCase = Depends(get_system_info_use_case),
+    dashboard_use_case: GetDashboardDataUseCase = Depends(get_dashboard_data_use_case)
+):
+    """Streams system metrics, latency diagnostics, and pool sizes every 4 seconds."""
+    await websocket.accept()
+    try:
+        while True:
+            sys_info = await use_case.execute(GetSystemInfoQuery())
+            dash_data = await dashboard_use_case.execute(GetDashboardDataQuery())
+            
+            payload = {
+                "system": sys_info.model_dump(),
+                "latencies": dash_data.latencies,
+                "database_pool": dash_data.database_pool,
+                "playwright_details": dash_data.playwright_details,
+                "timestamp": time.time()
+            }
+            await websocket.send_text(json.dumps(payload))
+            await asyncio.sleep(4.0)
+    except WebSocketDisconnect:
+        pass
+    except Exception as e:
+        logger.error(f"Error in websocket system stats stream: {e}")

@@ -1,4 +1,5 @@
 import os
+import re
 import yaml
 from pydantic import BaseModel, Field
 from typing import List, Dict, Any, Optional
@@ -51,6 +52,39 @@ class CompaniesConfig(BaseModel):
     blacklist: List[str] = Field(default_factory=list)
     whitelist: List[str] = Field(default_factory=list)
 
+def check_placeholders(data: Any, path: str = "") -> None:
+    """Recursively checks for bracketed unpopulated placeholders like <FULL_NAME>."""
+    if isinstance(data, str):
+        if data.startswith("<") and data.endswith(">"):
+            raise ConfigurationError(f"Found unpopulated placeholder '{data}' at path '{path}'")
+    elif isinstance(data, dict):
+        for k, v in data.items():
+            check_placeholders(v, f"{path}.{k}" if path else k)
+    elif isinstance(data, list):
+        for idx, item in enumerate(data):
+            check_placeholders(item, f"{path}[{idx}]")
+
+def parse_experience_years(exp: Any) -> float:
+    """Parses experience strings (e.g. 3y10m or 3.1) into float years."""
+    if exp is None:
+        return 0.0
+    if isinstance(exp, (int, float)):
+        return float(exp)
+    if isinstance(exp, str):
+        exp_str = exp.strip().lower()
+        # Parse formats like "3y10m"
+        m = re.match(r'^(?:(\d+)y)?\s*(?:(\d+)m)?$', exp_str)
+        if m:
+            years = int(m.group(1)) if m.group(1) else 0
+            months = int(m.group(2)) if m.group(2) else 0
+            return round(years + (months / 12.0), 2)
+        # Parse standard numbers
+        try:
+            return float(exp_str)
+        except ValueError:
+            pass
+    raise ConfigurationError(f"Unable to parse experience string format: {exp}")
+
 class YAMLConfigLoader:
     def __init__(self, config_dir: str = "config"):
         self.config_dir = config_dir
@@ -69,22 +103,25 @@ class YAMLConfigLoader:
         data = self._load_yaml("profile.yaml")
         try:
             ProfileConfig.model_validate(data)
+            check_placeholders(data)
             return True
         except Exception as e:
-            raise ConfigurationError(f"Invalid profile.yaml schema: {e}")
+            raise ConfigurationError(f"Profile config validation failed: {e}")
 
     def validate_answers(self) -> bool:
         data = self._load_yaml("answers.yaml")
         try:
             AnswersConfig.model_validate(data)
+            check_placeholders(data)
             return True
         except Exception as e:
-            raise ConfigurationError(f"Invalid answers.yaml schema: {e}")
+            raise ConfigurationError(f"Answers config validation failed: {e}")
 
     def validate_companies(self) -> bool:
         data = self._load_yaml("companies.yaml")
         try:
             CompaniesConfig.model_validate(data)
+            check_placeholders(data)
             return True
         except Exception as e:
-            raise ConfigurationError(f"Invalid companies.yaml schema: {e}")
+            raise ConfigurationError(f"Companies config validation failed: {e}")

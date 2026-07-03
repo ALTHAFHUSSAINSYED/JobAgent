@@ -6,6 +6,7 @@ from app.infrastructure.database.unit_of_work import SQLAlchemyUnitOfWork
 from app.infrastructure.repositories.candidate import SQLAlchemyCandidateRepository
 from app.infrastructure.repositories.job import SQLAlchemyJobRepository
 from app.infrastructure.repositories.application import SQLAlchemyApplicationRepository
+from app.infrastructure.repositories.resume import ResumeManager
 from app.infrastructure.redis.event_bus import RedisEventBus
 from app.infrastructure.config.yaml_loader import YAMLConfigLoader
 from app.infrastructure.browser_client import PlaywrightVerifier
@@ -30,6 +31,9 @@ def get_playwright_verifier() -> PlaywrightVerifier:
 
 def get_openrouter_verifier() -> OpenRouterVerifier:
     return OpenRouterVerifier()
+
+def get_resume_manager() -> ResumeManager:
+    return ResumeManager()
 
 def get_unit_of_work(session: AsyncSession = Depends(get_async_session)) -> SQLAlchemyUnitOfWork:
     return SQLAlchemyUnitOfWork(session)
@@ -82,12 +86,14 @@ def get_configuration_details_use_case(
 def get_dashboard_data_use_case(
     health_use_case: HealthCheckUseCase = Depends(get_health_check_use_case),
     config_use_case: GetConfigurationDetailsUseCase = Depends(get_configuration_details_use_case),
-    session: AsyncSession = Depends(get_async_session)
+    session: AsyncSession = Depends(get_async_session),
+    resume_manager: ResumeManager = Depends(get_resume_manager)
 ) -> GetDashboardDataUseCase:
     return GetDashboardDataUseCase(
         health_use_case=health_use_case,
         config_use_case=config_use_case,
-        db_session=session
+        db_session=session,
+        resume_manager=resume_manager
     )
 
 def get_version_use_case() -> GetVersionUseCase:
