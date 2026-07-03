@@ -1,0 +1,41 @@
+# Secrets
+config/profile.yaml
+config/credentials.yaml
+config/secrets.yaml
+config/answers.yaml
+
+# Environment
+.env
+.env.*
+!.env.example
+
+# Python
+__pycache__/
+*.pyc
+
+# Logs
+logs/
+
+# Browser
+browser_profiles/
+
+# Screenshots
+screenshots/
+
+# Generated
+generated/
+
+# Database
+*.db
+
+# Playwright
+playwright/.auth/
+
+# IDE
+.vscode/
+.idea/
+
+# AWS
+*.pem
+*.key
+*.ppk

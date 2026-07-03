@@ -1,0 +1,41 @@
+version: '1.0'
+personal:
+  full_name: "<FULL_NAME>"
+  gender: "<GENDER>"
+  date_of_birth: "<YYYY-MM-DD>"
+  nationality: "<NATIONALITY>"
+  marital_status: "<MARITAL_STATUS>"
+contact:
+  email:
+    primary: "<EMAIL>"
+    alternate: null
+  phone:
+    country: "<COUNTRY>"
+    country_code: "<COUNTRY_CODE>"
+    number: "<PHONE_NUMBER>"
+    full: "<COUNTRY_CODE_PHONE_NUMBER>"
+  whatsapp:
+    same_as_phone: true
+    country: "<COUNTRY>"
+    country_code: "<COUNTRY_CODE>"
+    number: "<PHONE_NUMBER>"
+  alternate_phone: null
+  preferred_contact:
+  - Phone
+  - WhatsApp
+  - Email
+  timezone: "<TIMEZONE>"
+profiles:
+  linkedin: "<LINKEDIN_URL>"
+  github: "<GITHUB_URL>"
+  portfolio: "<PORTFOLIO_URL>"
+career:
+  designation: "<DESIGNATION>"
+  company: "<COMPANY>"
+  experience: "<EXPERIENCE>"
+  employment_status: "<EMPLOYMENT_STATUS>"
+  immediate_joiner: true
+  last_working_day: "<YYYY-MM-DD>"
+salary:
+  current_ctc_lpa: 0.0
+  expected_ctc_lpa: 0.0
