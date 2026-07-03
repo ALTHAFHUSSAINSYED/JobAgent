@@ -1,5 +1,5 @@
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import datetime, timezone
 from uuid import UUID, uuid4
 from typing import Optional, List, Dict, Any
 from app.domain.value_objects import ApplicationStatus, JobStatus
@@ -11,7 +11,7 @@ class Candidate:
     phone: Optional[str] = None
     profile_url: Optional[str] = None
     id: UUID = field(default_factory=uuid4)
-    created_at: datetime = field(default_factory=datetime.utcnow)
+    created_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
 
 @dataclass
 class Job:
@@ -24,7 +24,7 @@ class Job:
     match_score: Optional[float] = None
     status: JobStatus = JobStatus.UNPROCESSED
     id: UUID = field(default_factory=uuid4)
-    created_at: datetime = field(default_factory=datetime.utcnow)
+    created_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
 
 @dataclass
 class Application:
@@ -34,4 +34,4 @@ class Application:
     tailored_resume_path: Optional[str] = None
     submitted_payload: Optional[str] = None
     id: UUID = field(default_factory=uuid4)
-    submitted_at: datetime = field(default_factory=datetime.utcnow)
+    submitted_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
