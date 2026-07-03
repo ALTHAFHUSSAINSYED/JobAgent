@@ -10,7 +10,14 @@ from app.infrastructure.redis.event_bus import RedisEventBus
 from app.infrastructure.config.yaml_loader import YAMLConfigLoader
 from app.infrastructure.browser_client import PlaywrightVerifier
 from app.infrastructure.llm_client import OpenRouterVerifier
-from app.application.handlers import HealthCheckUseCase, ValidateConfigurationUseCase
+from app.application.handlers import (
+    HealthCheckUseCase, 
+    ValidateConfigurationUseCase,
+    GetSystemInfoUseCase,
+    GetConfigurationDetailsUseCase,
+    GetDashboardDataUseCase,
+    GetVersionUseCase
+)
 
 def get_yaml_config_loader() -> YAMLConfigLoader:
     return YAMLConfigLoader()
@@ -55,3 +62,33 @@ def get_validate_config_use_case(
     config_loader: YAMLConfigLoader = Depends(get_yaml_config_loader)
 ) -> ValidateConfigurationUseCase:
     return ValidateConfigurationUseCase(config_loader)
+
+def get_system_info_use_case(
+    session: AsyncSession = Depends(get_async_session),
+    event_bus: RedisEventBus = Depends(get_event_bus),
+    playwright_verifier: PlaywrightVerifier = Depends(get_playwright_verifier)
+) -> GetSystemInfoUseCase:
+    return GetSystemInfoUseCase(
+        db_session=session,
+        event_bus=event_bus,
+        playwright_verifier=playwright_verifier
+    )
+
+def get_configuration_details_use_case(
+    config_loader: YAMLConfigLoader = Depends(get_yaml_config_loader)
+) -> GetConfigurationDetailsUseCase:
+    return GetConfigurationDetailsUseCase(config_loader)
+
+def get_dashboard_data_use_case(
+    health_use_case: HealthCheckUseCase = Depends(get_health_check_use_case),
+    config_use_case: GetConfigurationDetailsUseCase = Depends(get_configuration_details_use_case),
+    session: AsyncSession = Depends(get_async_session)
+) -> GetDashboardDataUseCase:
+    return GetDashboardDataUseCase(
+        health_use_case=health_use_case,
+        config_use_case=config_use_case,
+        db_session=session
+    )
+
+def get_version_use_case() -> GetVersionUseCase:
+    return GetVersionUseCase()
