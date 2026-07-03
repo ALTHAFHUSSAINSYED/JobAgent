@@ -17,8 +17,8 @@ depends_on: Union[str, Sequence[str], None] = None
 
 
 def upgrade() -> None:
-    # Drop old jobs table and rebuild with expanded schema
-    op.drop_table('jobs')
+    # Drop old jobs table (cascade to remove the FK constraint on applications)
+    op.execute("DROP TABLE IF EXISTS jobs CASCADE")
 
     op.create_table(
         'jobs',
@@ -54,9 +54,17 @@ def upgrade() -> None:
     op.create_index('ix_jobs_match_score', 'jobs', ['match_score'])
     op.create_index('ix_jobs_status', 'jobs', ['status'])
 
+    # Restore the FK from applications to new jobs table
+    op.create_foreign_key(
+        'applications_job_id_fkey',
+        'applications', 'jobs',
+        ['job_id'], ['id'],
+        ondelete='CASCADE'
+    )
+
 
 def downgrade() -> None:
-    op.drop_table('jobs')
+    op.execute("DROP TABLE IF EXISTS jobs CASCADE")
 
     op.create_table(
         'jobs',
@@ -71,4 +79,11 @@ def downgrade() -> None:
         sa.Column('status', sa.String(length=50), nullable=False),
         sa.Column('created_at', sa.DateTime(), nullable=False),
         sa.PrimaryKeyConstraint('id')
+    )
+
+    op.create_foreign_key(
+        'applications_job_id_fkey',
+        'applications', 'jobs',
+        ['job_id'], ['id'],
+        ondelete='CASCADE'
     )
