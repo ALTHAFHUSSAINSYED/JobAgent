@@ -32,35 +32,34 @@ backend/app/<module_name>/
   - Secure credential loading and validation of candidate detail file structures.
 - **Milestone:** CLI system starts up, validates `profile.yaml` schema, parses credentials, and runs verification checks.
 
-### Sprint 2: Job Discovery & Description Parsing
-- **Goals:** Setup Event Bus (Redis) and implement Module 4 (JD Intelligence Engine).
-- **Deliverables:**
-  - Initialize the Redis event broker and publisher/subscriber interfaces.
-  - Implement raw HTML job post scraping from portals.
-  - Parse job title, company, description details, and experience keywords into structured JSON.
-- **Milestone:** Emitting `job.discovered` publishes an event that resolves to a cleanly structured `jd.parsed` message.
+### Sprint 2: Job Discovery & Intelligence
+- **Goals:** Establish the discovery backend and intelligent candidate matching pipeline.
+- **Sub-sprints:**
+  - **Sprint 2.1 (Job Discovery Engine):** Build provider interface (`IJobProvider`) and implement Lever/Greenhouse public JSON API pullers, hourly scheduler pipelines, duplicate hashing, and rule-based candidate match scoring.
+  - **Sprint 2.2 (JD Intelligence):** Integrate OpenRouter LLM parsing job descriptions into structured metadata (responsibilities, missing skills, keywords, ATS score).
+  - **Sprint 2.3 (Resume Intelligence):** Implement AI-based resume picker, custom resume tailored outputs, and cover letters generation.
+  - **Sprint 2.4 (Application Queue):** Define the queue pipeline classification states: Apply, Skip, and Manual Review.
+  - **Sprint 2.5 (Browser Automation):** Initialize Playwright integrations only for final form fill auto-submits.
+- **Milestone:** Scraped jobs visible in dashboard list; duplicate checks and candidate match scores showing in the UI.
 
-### Sprint 3: Match Engine & Resume Intelligence
-- **Goals:** Implement Module 3 (Resume Intelligence Engine) and Module 5 (Matching Engine).
+### Sprint 3: Resume Intelligence & Form-Filling Automation
+- **Goals:** Automate ATS resume tailoring and persistent form-filler actions.
 - **Deliverables:**
-  - Build the matching engine using heuristics first, then falling back to LLM calls.
-  - Extract text segments from resume files (PDF/DOCX).
-  - Tailor resume files by restructuring highlights and project keywords to match specific JD requirements.
-- **Milestone:** Evaluation score generated for parsed job descriptions; tailored resumes generated in the output directory.
+  - Build PDF/DOCX resume generator parsing targeted keywords.
+  - Create Playwright form fillers mapping accessibility roles/labels inside target portals (Greenhouse, Lever, LinkedIn).
+- **Milestone:** Browser automation successfully populates and submits applications via queue items.
 
-### Sprint 4: Adaptive Browser Automation & Applications
-- **Goals:** Implement Module 6 (Browser Automation Engine) and Module 7 (Application Engine).
+### Sprint 4: Interview Preparation & CRM Recruiter Tracking
+- **Goals:** Build candidate interview trainer and recruiter feedback dashboards.
 - **Deliverables:**
-  - Implement the Playwright Chromium controller using persistent browser profiles.
-  - Set up the Adaptive Browser Agent (inspections via accessibility roles and labels).
-  - Code application handlers for ATS portals (LinkedIn Easy Apply, Workday, Lever, Greenhouse).
-  - Implement MFA/CAPTCHA intervention hooks.
-- **Milestone:** Auto-fill form interfaces dynamically on testing pages and submit test applications.
+  - Create mock interview Q&A generation matching applied JDs.
+  - Add recruiter application tracking status tables.
+- **Milestone:** Recruiter database entries tracked across Applied, Interviewing, Offered, Rejected states.
 
-### Sprint 5: Tracking, Alerts & Feedback Loops
-- **Goals:** Implement Module 8 (Tracking Engine), Module 9 (Notification Engine), and Module 10 (Learning Engine).
+### Sprint 5: Analytics, Alerts & Feedback Loops
+- **Goals:** Implement Slack notifications and match tuning.
 - **Deliverables:**
-  - Write SQL logic to track applications across states in PostgreSQL.
-  - Wire alerts to Slack, WhatsApp, or Telegram webhooks.
-  - Implement the Learning feedback loops which refine match priorities based on outcomes.
-- **Milestone:** Unified dashboard, live notifications, and pipeline analytics reporting running on the server.
+  - Build Slack/Telegram alerts channels mapping job status change updates.
+  - Implement feedback learning loop tuning match heuristics weights based on recruiter responses.
+- **Milestone:** Fully autonomous recruiter platform operating in production on EC2.
+
