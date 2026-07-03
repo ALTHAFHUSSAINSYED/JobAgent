@@ -1,0 +1,30 @@
+[tool.ruff]
+# Target Python version 3.12
+target-version = "py312"
+line-length = 120
+
+# Linting rules
+select = [
+    "E",   # pycodestyle errors
+    "W",   # pycodestyle warnings
+    "F",   # pyflakes
+    "I",   # isort (imports grouping ordering)
+    "B",   # bugbear
+    "C4",  # comprehensions improvements
+    "UP",  # pyupgrade modern syntax recommendations
+]
+ignore = [
+    "E501", # Ignore line-length limit warnings (handled by formatter)
+]
+
+[tool.ruff.isort]
+combine-as-imports = true
+known-first-party = ["app"]
+
+[tool.pytest.ini_options]
+minversion = "6.0"
+addopts = "-ra -q --tb=short --cov=app --cov-report=term-missing"
+testpaths = [
+    "backend/tests",
+]
+asyncio_mode = "auto"

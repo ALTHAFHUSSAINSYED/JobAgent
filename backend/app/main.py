@@ -12,6 +12,9 @@ from app.core.logging import setup_logging
 from app.core.correlation import correlation_id_ctx
 from app.presentation.routes import router as api_router
 from app.infrastructure.redis.event_bus import RedisEventBus
+from app.core.metrics import PrometheusMiddleware
+from prometheus_client import generate_latest, CONTENT_TYPE_LATEST
+from fastapi import Response
 
 logger = logging.getLogger("app.main")
 
@@ -136,6 +139,8 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+app.add_middleware(PrometheusMiddleware)
+
 @app.middleware("http")
 async def add_correlation_id(request: Request, call_next):
     # Set unique correlation tracking ID for incoming request loops
@@ -147,5 +152,10 @@ async def add_correlation_id(request: Request, call_next):
         return response
     finally:
         correlation_id_ctx.reset(token)
+
+@app.get("/metrics", tags=["Observability"])
+@app.get("/api/v1/metrics", tags=["Observability"])
+def metrics_endpoint():
+    return Response(content=generate_latest(), media_type=CONTENT_TYPE_LATEST)
 
 app.include_router(api_router)

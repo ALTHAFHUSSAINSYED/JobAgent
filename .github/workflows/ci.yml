@@ -1,0 +1,106 @@
+name: Continuous Integration
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  static-analysis:
+    name: Lint & Type Check
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: "pip"
+
+      - name: Install Linting Dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install ruff mypy pyyaml pydantic pydantic-settings sqlalchemy asyncpg redis prometheus-client pytest pytest-asyncio pytest-cov
+
+      - name: Run Ruff Linter
+        run: ruff check backend/app
+
+      - name: Run Ruff Formatter Check
+        run: ruff format --check backend/app
+
+      - name: Run MyPy Type Checker
+        run: mypy --config-file mypy.ini backend/app
+
+  unit-tests:
+    name: Backend Unit Tests
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:17-alpine
+        env:
+          POSTGRES_DB: jobpilot_db
+          POSTGRES_USER: jobpilot_user
+          POSTGRES_PASSWORD: jobpilot_secure_password
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+      redis:
+        image: redis:7-alpine
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: "pip"
+
+      - name: Install Testing Dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r backend/requirements.txt
+
+      - name: Copy Config Templates
+        run: |
+          cp config/profile.template.yaml config/profile.yaml
+          cp config/answers.template.yaml config/answers.yaml
+          cp config/companies.template.yaml config/companies.yaml
+
+      - name: Run pytest with Coverage
+        env:
+          DATABASE_URL: postgresql+asyncpg://jobpilot_user:jobpilot_secure_password@localhost:5432/jobpilot_db
+          REDIS_URL: redis://localhost:6379/0
+          OPENROUTER_API_KEY: mock_key
+          ENV: development
+        run: |
+          python -m pytest --cov=backend/app --cov-report=xml backend/tests/
+
+  docker-build:
+    name: Docker Build Validation
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Validate Docker Compose Configuration
+        run: docker compose config
+
+      - name: Build Images
+        run: docker compose build
