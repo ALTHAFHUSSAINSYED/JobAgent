@@ -1,0 +1,17 @@
+[tool.poetry]
+name = "jobpilot-backend"
+version = "1.0.0"
+description = "JobPilot AI Backend Service"
+authors = ["Althaf Hussain Syed <althafhussain.sd@gmail.com>"]
+
+[tool.ruff]
+line-length = 88
+target-version = "py312"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "N", "UP", "B", "A", "C4", "T20", "RET", "SIM", "PTH", "ERA", "PL"]
+ignore = []
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]
