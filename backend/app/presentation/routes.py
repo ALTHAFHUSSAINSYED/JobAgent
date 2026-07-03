@@ -15,8 +15,8 @@ from app.application.queries import (
     GetSystemInfoQuery,
     GetConfigurationDetailsQuery,
     GetDashboardDataQuery,
-    GetVersionQuery
 )
+from app.application.commands import ValidateConfigurationCommand
 from app.infrastructure.providers.dependencies import (
     get_health_check_use_case,
     get_validate_config_use_case,
