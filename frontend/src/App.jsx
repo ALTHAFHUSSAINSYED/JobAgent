@@ -886,6 +886,8 @@ function App() {
         </section>
 
       </main>
+      </>
+      )}
 
       {/* 4. Footer */}
       <footer className="max-w-7xl mx-auto px-6 mt-10 pt-6 border-t border-[#1f2937] flex flex-col md:flex-row items-center justify-between text-xs text-gray-600 gap-4">
@@ -901,8 +903,6 @@ function App() {
       </footer>
 
     </div>
-    </>
-    )}
   )
 }
 
