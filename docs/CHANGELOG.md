@@ -17,6 +17,7 @@ All notable changes to the **JobPilot AI** project will be documented in this fi
 - `backend/app/application/queries.py` (HealthCheckQuery)
 - `backend/app/application/handlers.py` (ValidateConfigurationUseCase and HealthCheckUseCase handlers)
 - `backend/app/application/services.py` (Application service helpers placeholder)
+- `backend/app/infrastructure/database/__init__.py` (Database package setup, replacing database.py)
 - `backend/app/infrastructure/database/models.py` (SQLAlchemy async models mapping schema tables)
 - `backend/app/infrastructure/database/unit_of_work.py` (SQLAlchemy async transaction context boundary)
 - `backend/app/infrastructure/repositories/base.py` (Generic SQLAlchemy repository helper)
@@ -31,6 +32,9 @@ All notable changes to the **JobPilot AI** project will be documented in this fi
 
 ### Files Modified
 - `backend/app/presentation/routes.py` (Updated health check endpoint, added config validation route with tags)
+
+### Files Deleted
+- `backend/app/infrastructure/database.py` (Replaced by package folder entrypoint database/__init__.py)
 
 ### Breaking Changes
 None.
