@@ -175,46 +175,51 @@ class GetConfigurationDetailsUseCase:
             profile_data = {}
             answers_data = {}
 
-        # Safe defaults
-        personal = profile_data.get("personal", {})
-        salary = profile_data.get("salary", {})
-        career = profile_data.get("career", {})
-
         expected_ctc = "N/A"
-        for key in ["expected", "expected_ctc_lpa", "expected_ctc"]:
-            if salary.get(key) is not None:
-                expected_ctc = salary.get(key)
-                break
-        
-        pref_loc = career.get("preferred_locations") or career.get("locations") or []
-        if not isinstance(pref_loc, list):
-            pref_loc = [pref_loc] if pref_loc else []
-            
+        pref_loc = []
         joiner = False
-        val = answers_data.get("immediate_joiner")
-        if val is not None:
-            if isinstance(val, str):
-                joiner = val.lower() in ("yes", "true", "y")
-            else:
-                joiner = bool(val)
-        
-        exp = career.get("total_experience")
-        if exp is None:
-            exp = career.get("experience")
-            
-        from app.infrastructure.config.yaml_loader import parse_experience_years
-        exp_float = parse_experience_years(exp)
+        exp_float = 0.0
+        skills_list = []
 
-        skills = career.get("skills", [])
-        if isinstance(skills, dict):
-            skills_list = list(skills.keys())
-        elif isinstance(skills, list):
-            skills_list = [s.get("name") if isinstance(s, dict) else str(s) for s in skills]
-        else:
-            skills_list = []
+        try:
+            # Safe defaults
+            personal = profile_data.get("personal", {})
+            salary = profile_data.get("salary", {})
+            career = profile_data.get("career", {})
+
+            for key in ["expected", "expected_ctc_lpa", "expected_ctc"]:
+                if salary.get(key) is not None:
+                    expected_ctc = str(salary.get(key))
+                    break
+            
+            pref_loc = career.get("preferred_locations") or career.get("locations") or []
+            if not isinstance(pref_loc, list):
+                pref_loc = [pref_loc] if pref_loc else []
+                
+            val = answers_data.get("immediate_joiner")
+            if val is not None:
+                if isinstance(val, str):
+                    joiner = val.lower() in ("yes", "true", "y")
+                else:
+                    joiner = bool(val)
+            
+            exp = career.get("total_experience")
+            if exp is None:
+                exp = career.get("experience")
+                
+            from app.infrastructure.config.yaml_loader import parse_experience_years
+            exp_float = parse_experience_years(exp)
+
+            skills = career.get("skills", [])
+            if isinstance(skills, dict):
+                skills_list = list(skills.keys())
+            elif isinstance(skills, list):
+                skills_list = [s.get("name") if isinstance(s, dict) else str(s) for s in skills]
+        except Exception as e:
+            logger.warning(f"Error parsing configuration details, using safe defaults: {e}")
 
         return ConfigDetailDTO(
-            expected_ctc=str(expected_ctc),
+            expected_ctc=expected_ctc,
             preferred_locations=pref_loc,
             immediate_joiner=joiner,
             experience_years=exp_float,
