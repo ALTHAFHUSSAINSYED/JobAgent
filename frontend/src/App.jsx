@@ -21,6 +21,23 @@ import {
   Info
 } from 'lucide-react'
 
+// Helpers to dynamically map API/WebSocket requests to the correct backend port (8000)
+const getApiUrl = (path) => {
+  const isFrontEndPort = window.location.port === '3000';
+  const backendPort = isFrontEndPort ? '8000' : (window.location.port || (window.location.protocol === 'https:' ? '443' : '80'));
+  const protocol = window.location.protocol;
+  const hostname = window.location.hostname;
+  return `${protocol}//${hostname}:${backendPort}${path}`;
+}
+
+const getWsUrl = (path) => {
+  const isFrontEndPort = window.location.port === '3000';
+  const backendPort = isFrontEndPort ? '8000' : (window.location.port || (window.location.protocol === 'https:' ? '443' : '80'));
+  const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+  const hostname = window.location.hostname;
+  return `${protocol}//${hostname}:${backendPort}${path}`;
+}
+
 function App() {
   const [data, setData] = useState(null)
   const [systemStats, setSystemStats] = useState(null)
@@ -38,7 +55,7 @@ function App() {
 
   // 1. Fetch initial snapshot
   const fetchDashboard = () => {
-    fetch('/api/v1/dashboard')
+    fetch(getApiUrl('/api/v1/dashboard'))
       .then(res => res.json())
       .then(d => setData(d))
       .catch(e => console.error("Error loading dashboard data:", e))
@@ -47,11 +64,8 @@ function App() {
   useEffect(() => {
     fetchDashboard()
 
-    const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:'
-    const host = window.location.host
-
     // A. Logs Stream WebSocket
-    const logsWs = new WebSocket(`${protocol}//${host}/api/v1/ws/logs`)
+    const logsWs = new WebSocket(getWsUrl('/api/v1/ws/logs'))
     logsWs.onopen = () => setSocketsState(prev => ({ ...prev, logs: 'connected' }))
     logsWs.onclose = () => setSocketsState(prev => ({ ...prev, logs: 'disconnected' }))
     logsWs.onmessage = (event) => {
@@ -69,7 +83,7 @@ function App() {
     }
 
     // B. System Stats WebSocket (streams CPU, pool details and latencies)
-    const systemWs = new WebSocket(`${protocol}//${host}/api/v1/ws/system`)
+    const systemWs = new WebSocket(getWsUrl('/api/v1/ws/system'))
     systemWs.onopen = () => setSocketsState(prev => ({ ...prev, system: 'connected' }))
     systemWs.onclose = () => setSocketsState(prev => ({ ...prev, system: 'disconnected' }))
     systemWs.onmessage = (event) => {
@@ -84,7 +98,7 @@ function App() {
     }
 
     // C. Events Alerts WebSocket
-    const eventsWs = new WebSocket(`${protocol}//${host}/api/v1/ws/events`)
+    const eventsWs = new WebSocket(getWsUrl('/api/v1/ws/events'))
     eventsWs.onopen = () => setSocketsState(prev => ({ ...prev, events: 'connected' }))
     eventsWs.onclose = () => setSocketsState(prev => ({ ...prev, events: 'disconnected' }))
     eventsWs.onmessage = (event) => {
