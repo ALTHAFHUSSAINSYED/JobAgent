@@ -182,17 +182,30 @@ class GetConfigurationDetailsUseCase:
         salary = profile_data.get("salary", {})
         career = profile_data.get("career", {})
 
-        expected_ctc = salary.get("expected") or salary.get("expected_ctc_lpa") or salary.get("expected_ctc") or "N/A"
+        expected_ctc = "N/A"
+        for key in ["expected", "expected_ctc_lpa", "expected_ctc"]:
+            if salary.get(key) is not None:
+                expected_ctc = salary.get(key)
+                break
         
         pref_loc = career.get("preferred_locations") or career.get("locations") or []
         if not isinstance(pref_loc, list):
             pref_loc = [pref_loc] if pref_loc else []
             
-        joiner = answers_data.get("immediate_joiner", "no").lower() in ("yes", "true", "y") if isinstance(answers_data.get("immediate_joiner"), str) else bool(answers_data.get("immediate_joiner"))
+        joiner = False
+        val = answers_data.get("immediate_joiner")
+        if val is not None:
+            if isinstance(val, str):
+                joiner = val.lower() in ("yes", "true", "y")
+            else:
+                joiner = bool(val)
         
-        exp = career.get("total_experience") or career.get("experience") or 0.0
+        exp = career.get("total_experience")
+        if exp is None:
+            exp = career.get("experience")
+            
         try:
-            exp_float = float(exp)
+            exp_float = float(exp) if exp is not None else 0.0
         except ValueError:
             exp_float = 0.0
 
