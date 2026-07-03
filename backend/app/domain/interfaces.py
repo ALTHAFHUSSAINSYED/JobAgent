@@ -66,3 +66,15 @@ class IEventBus(ABC):
     async def subscribe(self, event_name: str, handler: Any) -> None:
         """Subscribe handler function to channel alerts."""
         pass
+
+class IJobProvider(ABC):
+    @abstractmethod
+    async def search(self, query: str) -> List[Any]:
+        """Discovers new jobs for a target role query."""
+        pass
+
+    @abstractmethod
+    async def fetch(self, url: str) -> Any:
+        """Fetches full details of a specific job posting."""
+        pass
+
