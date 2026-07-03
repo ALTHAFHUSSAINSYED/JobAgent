@@ -9,8 +9,8 @@ def event_loop():
     yield loop
     loop.close()
 
-@pytest.fixture(scope="session", autouse=True)
+@pytest.fixture(scope="function", autouse=True)
 async def cleanup_database_engine():
-    """Dispose engine after all tests to cleanly close pool connections."""
+    """Dispose engine after each test to cleanly close pool connections."""
     yield
     await async_engine.dispose()
