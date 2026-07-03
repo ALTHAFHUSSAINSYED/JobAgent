@@ -18,9 +18,18 @@ class Job:
     company_name: str
     job_title: str
     job_description: str
-    portal_id: Optional[str] = None
-    portal_name: Optional[str] = None
-    salary_range: Optional[str] = None
+    portal: str
+    apply_url: str
+    location: Optional[str] = None
+    remote: bool = False
+    salary: Optional[str] = None
+    experience: Optional[str] = None
+    skills: Optional[str] = None
+    posted_date: Optional[datetime] = None
+    scraped_date: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
+    employment_type: Optional[str] = None
+    work_mode: Optional[str] = None
+    source_hash: Optional[str] = None
     match_score: Optional[float] = None
     status: JobStatus = JobStatus.UNPROCESSED
     id: UUID = field(default_factory=uuid4)

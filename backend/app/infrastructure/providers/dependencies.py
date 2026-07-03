@@ -17,7 +17,9 @@ from app.application.handlers import (
     GetSystemInfoUseCase,
     GetConfigurationDetailsUseCase,
     GetDashboardDataUseCase,
-    GetVersionUseCase
+    GetVersionUseCase,
+    DiscoverJobsUseCase,
+    GetJobsUseCase
 )
 
 def get_yaml_config_loader() -> YAMLConfigLoader:
@@ -98,3 +100,15 @@ def get_dashboard_data_use_case(
 
 def get_version_use_case() -> GetVersionUseCase:
     return GetVersionUseCase()
+
+def get_discover_jobs_use_case(
+    session: AsyncSession = Depends(get_async_session),
+    event_bus: RedisEventBus = Depends(get_event_bus)
+) -> DiscoverJobsUseCase:
+    return DiscoverJobsUseCase(session=session, event_bus=event_bus)
+
+def get_jobs_use_case(
+    session: AsyncSession = Depends(get_async_session)
+) -> GetJobsUseCase:
+    return GetJobsUseCase(session=session)
+

@@ -27,7 +27,9 @@ from app.infrastructure.providers.dependencies import (
     get_system_info_use_case,
     get_configuration_details_use_case,
     get_dashboard_data_use_case,
-    get_version_use_case
+    get_version_use_case,
+    get_discover_jobs_use_case,
+    get_jobs_use_case
 )
 from app.application.handlers import (
     HealthCheckUseCase,
@@ -35,12 +37,15 @@ from app.application.handlers import (
     GetSystemInfoUseCase,
     GetConfigurationDetailsUseCase,
     GetDashboardDataUseCase,
-    GetVersionUseCase
+    GetVersionUseCase,
+    DiscoverJobsUseCase,
+    GetJobsUseCase
 )
 from app.core.logging import active_connections, log_history
 
 logger = logging.getLogger("app.presentation.routes")
 router = APIRouter()
+
 
 # WebSocket connections tracking lists
 events_connections: List[WebSocket] = []
@@ -170,3 +175,35 @@ async def websocket_system(
         pass
     except Exception as e:
         logger.error(f"Error in websocket system stats stream: {e}")
+
+
+@router.post("/api/v1/jobs/discover", tags=["Jobs"])
+async def trigger_job_discovery(
+    query: str = "",
+    use_case: DiscoverJobsUseCase = Depends(get_discover_jobs_use_case)
+):
+    """Triggers a full job discovery scan across all active providers."""
+    result = await use_case.execute(query_term=query)
+    return {"status": "ok", "discovered": result}
+
+
+@router.get("/api/v1/jobs", tags=["Jobs"])
+async def list_jobs(
+    search: str = "",
+    portal: str = "",
+    work_mode: str = "",
+    sort_by: str = "match_score",
+    page: int = 1,
+    page_size: int = 20,
+    use_case: GetJobsUseCase = Depends(get_jobs_use_case)
+):
+    """Returns paginated list of discovered jobs with filtering and sorting."""
+    return await use_case.execute(
+        search=search,
+        portal=portal,
+        work_mode=work_mode,
+        sort_by=sort_by,
+        page=page,
+        page_size=page_size,
+    )
+

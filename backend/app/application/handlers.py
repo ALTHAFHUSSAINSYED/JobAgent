@@ -336,7 +336,187 @@ class GetVersionUseCase:
             git_commit = "N/A"
 
         return VersionDTO(
-            version="0.4.0", # Bumped version for Sprint 1.4 Integration
+            version="0.5.0",  # Bumped version for Sprint 1.5 CI/CD + Sprint 2.1 Job Discovery
             build_date="2026-07-03",
             commit=git_commit
         )
+
+
+class DiscoverJobsUseCase:
+    """
+    Runs all active job providers, de-duplicates listings via SHA-256 hashes,
+    computes match scores, and persists new jobs into PostgreSQL.
+    """
+    def __init__(self, session: AsyncSession, event_bus: IEventBus):
+        from app.infrastructure.repositories.job import SQLAlchemyJobRepository
+        from app.infrastructure.providers.job.greenhouse import GreenhouseProvider
+        from app.infrastructure.providers.job.lever import LeverProvider
+        from app.infrastructure.providers.job.mock_providers import MockJobProvider
+        from app.application.scoring import calculate_match_score
+        from app.infrastructure.database.models import JobModel as JM
+        import uuid
+
+        self.session = session
+        self.event_bus = event_bus
+        self.job_repo = SQLAlchemyJobRepository(session)
+        self.providers = [
+            GreenhouseProvider(),
+            LeverProvider(),
+            MockJobProvider("LinkedIn"),
+            MockJobProvider("Naukri"),
+            MockJobProvider("Foundit"),
+        ]
+        self._calculate_score = calculate_match_score
+        self._uuid = uuid
+
+    async def execute(self, query_term: str = "") -> Dict[str, Any]:
+        from app.infrastructure.database.models import JobModel as JM
+        import uuid
+        from datetime import datetime, timezone
+
+        new_count = 0
+        skipped_count = 0
+        total_errors = 0
+
+        for provider in self.providers:
+            try:
+                jobs = await provider.search(query_term)
+                for job in jobs:
+                    # Duplicate detection
+                    exists = await self.job_repo.exists_by_hash(job.source_hash)
+                    if exists:
+                        skipped_count += 1
+                        continue
+
+                    # Calculate candidate match score
+                    score = self._calculate_score(
+                        job_title=job.job_title,
+                        job_description=job.job_description,
+                        skills=job.skills,
+                        location=job.location,
+                        work_mode=job.work_mode,
+                    )
+
+                    # Persist job to database
+                    job_model = JM(
+                        id=job.id,
+                        portal=job.portal,
+                        company_name=job.company_name,
+                        job_title=job.job_title,
+                        job_description=job.job_description,
+                        apply_url=job.apply_url,
+                        location=job.location,
+                        remote=job.remote,
+                        salary=job.salary,
+                        experience=job.experience,
+                        skills=job.skills,
+                        posted_date=job.posted_date,
+                        scraped_date=job.scraped_date,
+                        employment_type=job.employment_type,
+                        work_mode=job.work_mode,
+                        source_hash=job.source_hash,
+                        match_score=score,
+                        status="discovered",
+                        created_at=datetime.now(timezone.utc),
+                    )
+                    self.session.add(job_model)
+                    new_count += 1
+
+                await self.session.commit()
+            except Exception as e:
+                logger.error(f"Job discovery error for provider {provider.__class__.__name__}: {e}")
+                await self.session.rollback()
+                total_errors += 1
+
+        # Broadcast event
+        try:
+            await self.event_bus.publish("jobs.updated", {
+                "new": new_count,
+                "skipped": skipped_count,
+                "errors": total_errors
+            })
+        except Exception:
+            pass
+
+        logger.info(f"Job discovery complete: {new_count} new, {skipped_count} skipped, {total_errors} errors")
+        return {"new": new_count, "skipped": skipped_count, "errors": total_errors}
+
+
+class GetJobsUseCase:
+    """Lists jobs from PostgreSQL with filtering, sorting, and pagination."""
+
+    def __init__(self, session: AsyncSession):
+        self.session = session
+
+    async def execute(
+        self,
+        search: str = "",
+        portal: str = "",
+        work_mode: str = "",
+        sort_by: str = "match_score",
+        page: int = 1,
+        page_size: int = 20,
+    ) -> Dict[str, Any]:
+        from sqlalchemy import select, func
+        from app.infrastructure.database.models import JobModel as JM
+
+        stmt = select(JM)
+
+        # Apply filters
+        if search:
+            stmt = stmt.where(
+                JM.job_title.ilike(f"%{search}%") |
+                JM.company_name.ilike(f"%{search}%") |
+                JM.job_description.ilike(f"%{search}%")
+            )
+        if portal:
+            stmt = stmt.where(JM.portal.ilike(f"%{portal}%"))
+        if work_mode:
+            stmt = stmt.where(JM.work_mode.ilike(f"%{work_mode}%"))
+
+        # Count total
+        count_stmt = select(func.count()).select_from(stmt.subquery())
+        total = (await self.session.execute(count_stmt)).scalar_one()
+
+        # Apply sorting
+        if sort_by == "posted_date":
+            stmt = stmt.order_by(JM.posted_date.desc().nullsfirst())
+        elif sort_by == "created_at":
+            stmt = stmt.order_by(JM.created_at.desc())
+        else:
+            stmt = stmt.order_by(JM.match_score.desc().nullsfirst())
+
+        # Pagination
+        offset = (page - 1) * page_size
+        stmt = stmt.offset(offset).limit(page_size)
+
+        rows = (await self.session.execute(stmt)).scalars().all()
+
+        def _serialise(m: JM) -> Dict[str, Any]:
+            return {
+                "id": str(m.id),
+                "portal": m.portal,
+                "company": m.company_name,
+                "title": m.job_title,
+                "location": m.location,
+                "remote": m.remote,
+                "salary": m.salary,
+                "experience": m.experience,
+                "skills": m.skills,
+                "apply_url": m.apply_url,
+                "posted_date": m.posted_date.isoformat() if m.posted_date else None,
+                "scraped_date": m.scraped_date.isoformat() if m.scraped_date else None,
+                "employment_type": m.employment_type,
+                "work_mode": m.work_mode,
+                "match_score": float(m.match_score) if m.match_score is not None else 0.0,
+                "status": m.status,
+                "description": m.job_description,
+            }
+
+        return {
+            "total": total,
+            "page": page,
+            "page_size": page_size,
+            "pages": max(1, (total + page_size - 1) // page_size),
+            "jobs": [_serialise(r) for r in rows],
+        }

@@ -1,4 +1,4 @@
-from sqlalchemy import Column, String, Text, Numeric, DateTime, ForeignKey
+from sqlalchemy import Column, String, Text, Numeric, DateTime, ForeignKey, Boolean
 from sqlalchemy.dialects.postgresql import UUID
 import uuid
 from datetime import datetime, timezone
@@ -19,13 +19,22 @@ class JobModel(Base):
     __tablename__ = "jobs"
     
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
-    portal_id = Column(String(100), nullable=True)
-    portal_name = Column(String(100), nullable=True)
+    portal = Column(String(100), nullable=False, index=True)
     company_name = Column(String(255), nullable=False, index=True)
     job_title = Column(String(255), nullable=False, index=True)
     job_description = Column(Text, nullable=False)
-    salary_range = Column(String(100), nullable=True)
-    match_score = Column(Numeric(5, 2), nullable=True)
+    apply_url = Column(String(750), nullable=False)
+    location = Column(String(255), nullable=True, index=True)
+    remote = Column(Boolean, nullable=False, default=False, index=True)
+    salary = Column(String(100), nullable=True)
+    experience = Column(String(100), nullable=True)
+    skills = Column(Text, nullable=True)
+    posted_date = Column(DateTime, nullable=True)
+    scraped_date = Column(DateTime, nullable=False, default=lambda: datetime.now(timezone.utc))
+    employment_type = Column(String(100), nullable=True)
+    work_mode = Column(String(100), nullable=True, index=True)
+    source_hash = Column(String(64), nullable=False, unique=True, index=True)
+    match_score = Column(Numeric(5, 2), nullable=True, index=True)
     status = Column(String(50), nullable=False, default="unprocessed", index=True)
     created_at = Column(DateTime, nullable=False, default=lambda: datetime.now(timezone.utc))
 

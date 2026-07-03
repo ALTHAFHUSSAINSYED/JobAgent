@@ -1,4 +1,4 @@
-import React, { useEffect, useState, useRef } from 'react'
+import React, { useEffect, useState, useRef, useCallback } from 'react'
 import { 
   Activity, 
   Database, 
@@ -18,7 +18,15 @@ import {
   Copy,
   Clock,
   HardDrive,
-  Info
+  Info,
+  Search,
+  Filter,
+  MapPin,
+  Zap,
+  ExternalLink,
+  ChevronLeft,
+  ChevronRight,
+  X
 } from 'lucide-react'
 
 // Helpers to dynamically map API/WebSocket requests to the correct backend port (8000)
@@ -39,6 +47,7 @@ const getWsUrl = (path) => {
 }
 
 function App() {
+  const [activeTab, setActiveTab] = useState('dashboard')
   const [data, setData] = useState(null)
   const [systemStats, setSystemStats] = useState(null)
   const [logs, setLogs] = useState([])
@@ -50,7 +59,19 @@ function App() {
     system: 'connecting',
     events: 'connecting'
   })
-  
+
+  // Jobs tab state
+  const [jobs, setJobs] = useState({ total: 0, page: 1, pages: 1, jobs: [] })
+  const [jobsLoading, setJobsLoading] = useState(false)
+  const [jobSearch, setJobSearch] = useState('')
+  const [jobPortal, setJobPortal] = useState('')
+  const [jobWorkMode, setJobWorkMode] = useState('')
+  const [jobSortBy, setJobSortBy] = useState('match_score')
+  const [jobPage, setJobPage] = useState(1)
+  const [selectedJob, setSelectedJob] = useState(null)
+  const [discovering, setDiscovering] = useState(false)
+  const [discoverResult, setDiscoverResult] = useState(null)
+
   const logsEndRef = useRef(null)
 
   // 1. Fetch initial snapshot
@@ -133,6 +154,44 @@ function App() {
     setTimeout(() => setCopiedHash(''), 2000)
   }
 
+  // Jobs tab handlers
+  const fetchJobs = useCallback(() => {
+    setJobsLoading(true)
+    const params = new URLSearchParams({
+      search: jobSearch,
+      portal: jobPortal,
+      work_mode: jobWorkMode,
+      sort_by: jobSortBy,
+      page: jobPage,
+      page_size: 15
+    })
+    fetch(getApiUrl(`/api/v1/jobs?${params}`))
+      .then(r => r.json())
+      .then(d => setJobs(d))
+      .catch(e => console.error('Jobs fetch error:', e))
+      .finally(() => setJobsLoading(false))
+  }, [jobSearch, jobPortal, jobWorkMode, jobSortBy, jobPage])
+
+  useEffect(() => { if (activeTab === 'jobs') fetchJobs() }, [activeTab, fetchJobs])
+
+  const triggerDiscovery = async () => {
+    setDiscovering(true)
+    setDiscoverResult(null)
+    try {
+      const res = await fetch(getApiUrl('/api/v1/jobs/discover'), { method: 'POST' })
+      const d = await res.json()
+      setDiscoverResult(d.discovered)
+      fetchJobs()
+    } catch (e) { console.error(e) }
+    finally { setDiscovering(false) }
+  }
+
+  const getScoreBadge = (score) => {
+    if (score >= 50) return { label: `${score}`, cls: 'bg-green-500/15 text-green-400 border-green-500/30' }
+    if (score >= 20) return { label: `${score}`, cls: 'bg-yellow-500/15 text-yellow-400 border-yellow-500/30' }
+    return { label: `${score}`, cls: 'bg-red-500/15 text-red-400 border-red-500/30' }
+  }
+
   // Filter logs list based on user selections
   const filteredLogs = logs.filter(log => {
     if (filterLevel === 'ALL') return true
@@ -194,6 +253,240 @@ function App() {
         </div>
       </header>
 
+      {/* Tab Navigation */}
+      <nav className="border-b border-[#1f2937] bg-[#0e1420] px-6">
+        <div className="max-w-7xl mx-auto flex gap-1">
+          {[
+            { key: 'dashboard', label: 'Dashboard', icon: <Activity className="h-3.5 w-3.5" /> },
+            { key: 'jobs', label: `Jobs ${jobs.total > 0 ? `(${jobs.total})` : ''}`, icon: <Briefcase className="h-3.5 w-3.5" /> },
+          ].map(tab => (
+            <button
+              key={tab.key}
+              onClick={() => setActiveTab(tab.key)}
+              className={`flex items-center gap-2 px-4 py-3 text-sm font-medium border-b-2 transition-colors ${
+                activeTab === tab.key
+                  ? 'border-blue-500 text-blue-400'
+                  : 'border-transparent text-gray-500 hover:text-gray-300'
+              }`}
+            >
+              {tab.icon}
+              {tab.label}
+            </button>
+          ))}
+        </div>
+      </nav>
+
+      {/* ─── JOBS TAB ─── */}
+      {activeTab === 'jobs' && (
+        <main className="max-w-7xl mx-auto px-6 mt-6 pb-10">
+          {/* Header row */}
+          <div className="flex flex-wrap items-center justify-between gap-4 mb-6">
+            <div>
+              <h2 className="text-xl font-bold text-white">Job Discovery</h2>
+              <p className="text-xs text-gray-500 mt-0.5">{jobs.total} positions found · sorted by match score</p>
+            </div>
+            <button
+              onClick={triggerDiscovery}
+              disabled={discovering}
+              className="flex items-center gap-2 px-4 py-2 bg-blue-600 hover:bg-blue-500 disabled:opacity-50 text-white text-sm font-semibold rounded-lg transition-all shadow-md shadow-blue-500/20"
+            >
+              {discovering ? <RefreshCw className="h-4 w-4 animate-spin" /> : <Zap className="h-4 w-4" />}
+              {discovering ? 'Discovering…' : 'Discover Jobs'}
+            </button>
+          </div>
+
+          {discoverResult && (
+            <div className="bg-green-500/10 border border-green-500/25 rounded-xl px-4 py-3 text-sm text-green-400 mb-4 flex items-center gap-2">
+              <CheckCircle className="h-4 w-4 shrink-0" />
+              Discovery complete: <span className="font-bold">{discoverResult.new} new</span> jobs saved,&nbsp;
+              {discoverResult.skipped} duplicates skipped, {discoverResult.errors} errors.
+            </div>
+          )}
+
+          {/* Filters Row */}
+          <div className="flex flex-wrap gap-3 mb-5">
+            <div className="relative flex-1 min-w-[200px]">
+              <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-500" />
+              <input
+                value={jobSearch} onChange={e => { setJobSearch(e.target.value); setJobPage(1) }}
+                placeholder="Search title, company, description…"
+                className="w-full bg-[#161b26] border border-[#1f2937] rounded-lg pl-9 pr-4 py-2 text-sm text-gray-200 placeholder-gray-600 focus:outline-none focus:border-blue-500/60"
+              />
+            </div>
+            <select
+              value={jobPortal} onChange={e => { setJobPortal(e.target.value); setJobPage(1) }}
+              className="bg-[#161b26] border border-[#1f2937] rounded-lg px-3 py-2 text-sm text-gray-300 focus:outline-none focus:border-blue-500/60"
+            >
+              <option value="">All Portals</option>
+              {['Greenhouse', 'Lever', 'LinkedIn', 'Naukri', 'Foundit'].map(p => <option key={p}>{p}</option>)}
+            </select>
+            <select
+              value={jobWorkMode} onChange={e => { setJobWorkMode(e.target.value); setJobPage(1) }}
+              className="bg-[#161b26] border border-[#1f2937] rounded-lg px-3 py-2 text-sm text-gray-300 focus:outline-none focus:border-blue-500/60"
+            >
+              <option value="">All Work Modes</option>
+              {['Remote', 'Hybrid', 'On-site'].map(m => <option key={m}>{m}</option>)}
+            </select>
+            <select
+              value={jobSortBy} onChange={e => setJobSortBy(e.target.value)}
+              className="bg-[#161b26] border border-[#1f2937] rounded-lg px-3 py-2 text-sm text-gray-300 focus:outline-none focus:border-blue-500/60"
+            >
+              <option value="match_score">Sort: Match Score</option>
+              <option value="posted_date">Sort: Posted Date</option>
+              <option value="created_at">Sort: Discovered</option>
+            </select>
+          </div>
+
+          {/* Job Cards Grid */}
+          {jobsLoading ? (
+            <div className="flex items-center justify-center h-48 text-gray-500 gap-2">
+              <RefreshCw className="h-5 w-5 animate-spin" /> Loading jobs…
+            </div>
+          ) : jobs.jobs.length === 0 ? (
+            <div className="text-center py-24 text-gray-600">
+              <Briefcase className="h-12 w-12 mx-auto mb-3 opacity-30" />
+              <p className="text-lg font-medium">No jobs found</p>
+              <p className="text-sm mt-1">Click "Discover Jobs" to scrape live listings.</p>
+            </div>
+          ) : (
+            <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
+              {jobs.jobs.map(job => {
+                const badge = getScoreBadge(Math.round(job.match_score))
+                return (
+                  <div
+                    key={job.id}
+                    onClick={() => setSelectedJob(job)}
+                    className="bg-[#161b26] border border-[#1f2937] hover:border-blue-500/40 rounded-xl p-4 cursor-pointer transition-all hover:shadow-lg hover:shadow-blue-500/5 flex flex-col gap-3"
+                  >
+                    <div className="flex justify-between items-start gap-2">
+                      <div className="min-w-0">
+                        <p className="text-white font-semibold text-sm truncate">{job.title}</p>
+                        <p className="text-gray-400 text-xs mt-0.5 truncate">{job.company}</p>
+                      </div>
+                      <span className={`shrink-0 text-xs font-bold px-2 py-0.5 rounded-full border ${badge.cls}`}>
+                        ★ {badge.label}
+                      </span>
+                    </div>
+
+                    <div className="flex flex-wrap gap-2 text-[11px]">
+                      <span className="flex items-center gap-1 bg-[#0d1117] border border-gray-800 px-2 py-0.5 rounded-full text-gray-400">
+                        <MapPin className="h-2.5 w-2.5" /> {job.location || 'N/A'}
+                      </span>
+                      <span className={`flex items-center gap-1 px-2 py-0.5 rounded-full border text-[11px] font-medium ${
+                        job.work_mode === 'Remote' ? 'bg-green-500/10 text-green-400 border-green-500/25'
+                        : job.work_mode === 'Hybrid' ? 'bg-yellow-500/10 text-yellow-400 border-yellow-500/25'
+                        : 'bg-gray-500/10 text-gray-400 border-gray-500/25'
+                      }`}>
+                        {job.work_mode || 'N/A'}
+                      </span>
+                      <span className="flex items-center gap-1 bg-[#0d1117] border border-gray-800 px-2 py-0.5 rounded-full text-blue-400">
+                        {job.portal}
+                      </span>
+                    </div>
+
+                    {job.skills && (
+                      <div className="flex flex-wrap gap-1">
+                        {job.skills.split(',').slice(0, 4).map(s => (
+                          <span key={s} className="text-[10px] bg-blue-500/10 text-blue-400 border border-blue-500/20 px-1.5 py-0.5 rounded">{s.trim()}</span>
+                        ))}
+                        {job.skills.split(',').length > 4 && (
+                          <span className="text-[10px] text-gray-600">+{job.skills.split(',').length - 4} more</span>
+                        )}
+                      </div>
+                    )}
+
+                    <div className="flex justify-between items-center text-[10px] text-gray-600 pt-2 border-t border-gray-800/50">
+                      <span>{job.salary || 'Salary N/A'}</span>
+                      <span>{job.employment_type || 'Full-time'}</span>
+                    </div>
+                  </div>
+                )
+              })}
+            </div>
+          )}
+
+          {/* Pagination */}
+          {jobs.pages > 1 && (
+            <div className="flex items-center justify-center gap-4 mt-8">
+              <button
+                onClick={() => setJobPage(p => Math.max(1, p - 1))}
+                disabled={jobPage <= 1}
+                className="flex items-center gap-1 px-3 py-1.5 text-sm bg-[#161b26] border border-gray-800 rounded-lg text-gray-400 hover:text-white disabled:opacity-30"
+              >
+                <ChevronLeft className="h-4 w-4" /> Prev
+              </button>
+              <span className="text-sm text-gray-500">Page {jobPage} of {jobs.pages}</span>
+              <button
+                onClick={() => setJobPage(p => Math.min(jobs.pages, p + 1))}
+                disabled={jobPage >= jobs.pages}
+                className="flex items-center gap-1 px-3 py-1.5 text-sm bg-[#161b26] border border-gray-800 rounded-lg text-gray-400 hover:text-white disabled:opacity-30"
+              >
+                Next <ChevronRight className="h-4 w-4" />
+              </button>
+            </div>
+          )}
+        </main>
+      )}
+
+      {/* Job Detail Modal */}
+      {selectedJob && (
+        <div className="fixed inset-0 bg-black/70 backdrop-blur-sm z-50 flex items-center justify-center p-4" onClick={() => setSelectedJob(null)}>
+          <div className="bg-[#111827] border border-[#1f2937] rounded-2xl w-full max-w-2xl max-h-[85vh] overflow-y-auto shadow-2xl" onClick={e => e.stopPropagation()}>
+            <div className="sticky top-0 bg-[#111827] border-b border-[#1f2937] px-6 py-4 flex justify-between items-start gap-4">
+              <div>
+                <h3 className="text-white font-bold text-lg">{selectedJob.title}</h3>
+                <p className="text-gray-400 text-sm">{selectedJob.company} · {selectedJob.portal}</p>
+              </div>
+              <button onClick={() => setSelectedJob(null)} className="text-gray-500 hover:text-white shrink-0">
+                <X className="h-5 w-5" />
+              </button>
+            </div>
+            <div className="px-6 py-5 space-y-4">
+              <div className="grid grid-cols-2 gap-3 text-sm">
+                {[
+                  ['Location', selectedJob.location],
+                  ['Work Mode', selectedJob.work_mode],
+                  ['Employment', selectedJob.employment_type],
+                  ['Salary', selectedJob.salary],
+                  ['Experience', selectedJob.experience],
+                  ['Match Score', `★ ${Math.round(selectedJob.match_score)}`],
+                ].map(([k, v]) => (
+                  <div key={k} className="bg-[#161b26] rounded-lg px-3 py-2">
+                    <p className="text-gray-500 text-[11px] uppercase font-bold mb-0.5">{k}</p>
+                    <p className="text-gray-200 font-medium">{v || 'N/A'}</p>
+                  </div>
+                ))}
+              </div>
+              {selectedJob.skills && (
+                <div>
+                  <p className="text-gray-500 text-xs font-bold uppercase mb-2">Skills</p>
+                  <div className="flex flex-wrap gap-1.5">
+                    {selectedJob.skills.split(',').map(s => (
+                      <span key={s} className="text-xs bg-blue-500/10 text-blue-400 border border-blue-500/20 px-2 py-0.5 rounded-full">{s.trim()}</span>
+                    ))}
+                  </div>
+                </div>
+              )}
+              <div>
+                <p className="text-gray-500 text-xs font-bold uppercase mb-2">Description</p>
+                <p className="text-gray-300 text-sm leading-relaxed whitespace-pre-wrap">{selectedJob.description}</p>
+              </div>
+              <a
+                href={selectedJob.apply_url}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="flex items-center justify-center gap-2 w-full py-2.5 bg-blue-600 hover:bg-blue-500 text-white font-semibold text-sm rounded-xl transition-colors"
+              >
+                Apply Now <ExternalLink className="h-4 w-4" />
+              </a>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ─── DASHBOARD TAB ─── */}
+      {activeTab === 'dashboard' && (
+      <>
       {/* 2. Self Diagnosing Pillars Overview Grid */}
       <section className="max-w-7xl mx-auto px-6 mt-8">
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-4">
@@ -598,16 +891,18 @@ function App() {
       <footer className="max-w-7xl mx-auto px-6 mt-10 pt-6 border-t border-[#1f2937] flex flex-col md:flex-row items-center justify-between text-xs text-gray-600 gap-4">
         <div className="flex items-center gap-3">
           <GitBranch className="h-4 w-4" />
-          <span>Active Branch: <strong className="text-gray-400 font-semibold">{system?.git_branch || 'sprint-1.4'}</strong></span>
+          <span>Active Branch: <strong className="text-gray-400 font-semibold">{system?.git_branch || 'sprint-2.1'}</strong></span>
           <span className="text-gray-800">|</span>
           <span>Commit Hash: <strong className="text-gray-400 font-semibold">{system?.git_commit || 'N/A'}</strong></span>
         </div>
         <div>
-          <span>Platform Version: <strong className="text-gray-400 font-semibold">0.4.0 (Sprint 1.4 Release)</strong></span>
+          <span>Platform Version: <strong className="text-gray-400 font-semibold">0.5.0 (Sprint 2.1 Job Discovery)</strong></span>
         </div>
       </footer>
 
     </div>
+    </>
+    )}
   )
 }
 
