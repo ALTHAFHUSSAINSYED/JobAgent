@@ -4,6 +4,22 @@ All notable changes to the **JobPilot AI** project will be documented in this fi
 
 ---
 
+## [Sprint 1.5] - 2026-07-03
+
+### Files Created
+- `backend/app/core/metrics.py` (Prometheus HTTP requests metrics Counter and Histogram trackers)
+- `pyproject.toml` (Ruff linter standards and pytest cov configurations)
+- `mypy.ini` (MyPy static type checker configuration setup)
+- `.pre-commit-config.yaml` (Pre-commit hooks checking format rules)
+- `.github/workflows/ci.yml` (Continuous integration workflow executing checks and pytest suite)
+
+### Files Modified
+- `backend/requirements.txt` (Appended `pytest-cov` dependency)
+- `backend/app/main.py` (Registered PrometheusMiddleware and exposed `/metrics` endpoints)
+- `docker-compose.yml` (Added backend healthchecks and mapped depends_on condition: service_healthy criteria)
+
+---
+
 ## [Sprint 1.4] - 2026-07-03
 
 ### Files Created
