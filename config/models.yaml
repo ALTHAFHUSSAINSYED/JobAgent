@@ -1,0 +1,4 @@
+provider: OpenRouter
+default_model: google/gemini-2.5-flash
+fallback_model: deepseek/deepseek-chat
+temperature: 0.2

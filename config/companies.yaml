@@ -1,0 +1,13 @@
+priority:
+- JPMorgan Chase
+- Microsoft
+- Amazon
+- Google
+- IBM
+- Wipro
+- Capgemini
+- Deloitte
+- Cognizant
+- Accenture
+blacklist: []
+avoid_consultancies_requiring_payment: true

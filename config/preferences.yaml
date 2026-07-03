@@ -1,0 +1,21 @@
+roles:
+- DevOps Engineer
+- AWS DevOps Engineer
+- Cloud Engineer
+- Platform Engineer
+- SRE
+locations:
+  primary:
+  - Hyderabad
+  secondary:
+  - Any City in India
+  remote: true
+employment:
+- Permanent
+- Contract
+- Hybrid
+- Remote
+- Onsite
+travel: true
+relocation: true
+shifts: Any
