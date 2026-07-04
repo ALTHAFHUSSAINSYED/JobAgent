@@ -46,7 +46,59 @@ const getWsUrl = (path) => {
   return `${protocol}//${hostname}:${backendPort}${path}`;
 }
 
+const authFetch = (path, options = {}) => {
+  const headers = { ...options.headers };
+  const token = localStorage.getItem('jobpilot_token');
+  if (token) {
+    headers['Authorization'] = `Bearer ${token}`;
+  }
+  return fetch(getApiUrl(path), { ...options, headers });
+}
+
 function App() {
+  const [token, setToken] = useState(localStorage.getItem('jobpilot_token') || '')
+  const [authUsername, setAuthUsername] = useState(localStorage.getItem('jobpilot_username') || '')
+  const [loginForm, setLoginForm] = useState({ username: '', password: '' })
+  const [loginError, setLoginError] = useState('')
+
+  const handleLogin = (e) => {
+    e.preventDefault()
+    setLoginError('')
+    
+    const params = new URLSearchParams()
+    params.append('username', loginForm.username)
+    params.append('password', loginForm.password)
+    
+    fetch(getApiUrl('/api/v1/auth/login'), {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/x-www-form-urlencoded'
+      },
+      body: params
+    })
+      .then(res => {
+        if (!res.ok) throw new Error("Authentication failed")
+        return res.json()
+      })
+      .then(d => {
+        localStorage.setItem('jobpilot_token', d.access_token)
+        localStorage.setItem('jobpilot_username', d.username)
+        setToken(d.access_token)
+        setAuthUsername(d.username)
+      })
+      .catch(err => {
+        setLoginError('Invalid username or password.')
+      })
+  }
+
+  const handleLogout = () => {
+    localStorage.removeItem('jobpilot_token')
+    localStorage.removeItem('jobpilot_username')
+    setToken('')
+    setAuthUsername('')
+    setData(null)
+  }
+
   const [activeTab, setActiveTab] = useState('dashboard')
   const [data, setData] = useState(null)
   const [systemStats, setSystemStats] = useState(null)
@@ -71,22 +123,129 @@ function App() {
   const [selectedJob, setSelectedJob] = useState(null)
   const [discovering, setDiscovering] = useState(false)
   const [discoverResult, setDiscoverResult] = useState(null)
+  const [resumePack, setResumePack] = useState(null)
+  const [queueDecision, setQueueDecision] = useState(null)
+  const [browserRun, setBrowserRun] = useState(null)
+  const [linkedinRun, setLinkedinRun] = useState(null)
+
+  // AI Job Analysis Tab States
+  const [modalTab, setModalTab] = useState('overview')
+  const [jobAnalysis, setJobAnalysis] = useState(null)
+  const [appPackage, setAppPackage] = useState(null)
+  const [analysisLoading, setAnalysisLoading] = useState(false)
+  const [pipelineStats, setPipelineStats] = useState(null)
 
   const logsEndRef = useRef(null)
 
   // 1. Fetch initial snapshot
   const fetchDashboard = () => {
-    fetch(getApiUrl('/api/v1/dashboard'))
+    authFetch('/api/v1/dashboard')
       .then(res => res.json())
       .then(d => setData(d))
       .catch(e => console.error("Error loading dashboard data:", e))
   }
 
+  const fetchPipelineStatus = useCallback(() => {
+    authFetch('/api/v1/pipeline/status')
+      .then(res => res.json())
+      .then(d => setPipelineStats(d))
+      .catch(e => console.error("Error loading pipeline status:", e))
+  }, [])
+
+  const togglePipeline = (active) => {
+    authFetch(`/api/v1/pipeline/toggle?active=${active}`, { method: 'POST' })
+      .then(res => res.json())
+      .then(d => setPipelineStats(d))
+      .catch(e => console.error("Error toggling pipeline status:", e))
+  }
+
+  const fetchJobAnalysis = (jobId) => {
+    setAnalysisLoading(true)
+    authFetch(`/api/v1/jobs/${jobId}/analysis`)
+      .then(res => res.json())
+      .then(d => {
+        if (d.status === 'ok') {
+          setJobAnalysis(d)
+        } else {
+          setJobAnalysis(null)
+        }
+      })
+      .catch(e => console.error("Error loading job analysis:", e))
+      .finally(() => setAnalysisLoading(false))
+  }
+
+  const triggerJobAnalysis = (jobId) => {
+    setAnalysisLoading(true)
+    authFetch(`/api/v1/jobs/${jobId}/analyze`, { method: 'POST' })
+      .then(res => res.json())
+      .then(d => {
+        if (d.status === 'ok') {
+          setJobAnalysis(d)
+          fetchDashboard() // refresh telemetry metrics
+        }
+      })
+      .catch(e => console.error("Error triggering job analysis:", e))
+      .finally(() => setAnalysisLoading(false))
+  }
+
+  const fetchAppPackage = (jobId) => {
+    setAnalysisLoading(true)
+    authFetch(`/api/v1/jobs/${jobId}/application/package`)
+      .then(res => res.json())
+      .then(d => {
+        if (d.status === 'ok') {
+          setAppPackage(d)
+        } else {
+          setAppPackage(null)
+        }
+      })
+      .catch(e => console.error("Error loading application package:", e))
+      .finally(() => setAnalysisLoading(false))
+  }
+
+  const triggerAppPackage = (jobId) => {
+    setAnalysisLoading(true)
+    authFetch(`/api/v1/jobs/${jobId}/application/package`, { method: 'POST' })
+      .then(res => res.json())
+      .then(d => {
+        if (d.status === 'ok') {
+          setAppPackage(d)
+          fetchDashboard() // refresh telemetry metrics
+        }
+      })
+      .catch(e => console.error("Error triggering application package:", e))
+      .finally(() => setAnalysisLoading(false))
+  }
+
   useEffect(() => {
+    if (selectedJob) {
+      setModalTab('overview')
+      setJobAnalysis(null)
+      setAppPackage(null)
+      setResumePack(null)
+      setQueueDecision(null)
+      setBrowserRun(null)
+      setLinkedinRun(null)
+      fetchJobAnalysis(selectedJob.id)
+      fetchAppPackage(selectedJob.id)
+    }
+  }, [selectedJob])
+
+
+
+  useEffect(() => {
+    const localToken = localStorage.getItem('jobpilot_token')
+    if (!localToken) return
+
     fetchDashboard()
+    fetchPipelineStatus()
+
+    const pipelineInterval = setInterval(() => {
+      fetchPipelineStatus()
+    }, 5000)
 
     // A. Logs Stream WebSocket
-    const logsWs = new WebSocket(getWsUrl('/api/v1/ws/logs'))
+    const logsWs = new WebSocket(getWsUrl(`/api/v1/ws/logs?token=${localToken}`))
     logsWs.onopen = () => setSocketsState(prev => ({ ...prev, logs: 'connected' }))
     logsWs.onclose = () => setSocketsState(prev => ({ ...prev, logs: 'disconnected' }))
     logsWs.onmessage = (event) => {
@@ -104,7 +263,7 @@ function App() {
     }
 
     // B. System Stats WebSocket (streams CPU, pool details and latencies)
-    const systemWs = new WebSocket(getWsUrl('/api/v1/ws/system'))
+    const systemWs = new WebSocket(getWsUrl(`/api/v1/ws/system?token=${localToken}`))
     systemWs.onopen = () => setSocketsState(prev => ({ ...prev, system: 'connected' }))
     systemWs.onclose = () => setSocketsState(prev => ({ ...prev, system: 'disconnected' }))
     systemWs.onmessage = (event) => {
@@ -119,7 +278,7 @@ function App() {
     }
 
     // C. Events Alerts WebSocket
-    const eventsWs = new WebSocket(getWsUrl('/api/v1/ws/events'))
+    const eventsWs = new WebSocket(getWsUrl(`/api/v1/ws/events?token=${localToken}`))
     eventsWs.onopen = () => setSocketsState(prev => ({ ...prev, events: 'connected' }))
     eventsWs.onclose = () => setSocketsState(prev => ({ ...prev, events: 'disconnected' }))
     eventsWs.onmessage = (event) => {
@@ -137,11 +296,12 @@ function App() {
     }
 
     return () => {
+      clearInterval(pipelineInterval)
       logsWs.close()
       systemWs.close()
       eventsWs.close()
     }
-  }, [])
+  }, [token, fetchPipelineStatus])
 
   // Auto-scroll terminal
   useEffect(() => {
@@ -165,7 +325,7 @@ function App() {
       page: jobPage,
       page_size: 15
     })
-    fetch(getApiUrl(`/api/v1/jobs?${params}`))
+    authFetch(`/api/v1/jobs?${params}`)
       .then(r => r.json())
       .then(d => setJobs(d))
       .catch(e => console.error('Jobs fetch error:', e))
@@ -178,12 +338,64 @@ function App() {
     setDiscovering(true)
     setDiscoverResult(null)
     try {
-      const res = await fetch(getApiUrl('/api/v1/jobs/discover'), { method: 'POST' })
+      const res = await authFetch('/api/v1/jobs/discover', { method: 'POST' })
       const d = await res.json()
       setDiscoverResult(d.discovered)
       fetchJobs()
     } catch (e) { console.error(e) }
     finally { setDiscovering(false) }
+  }
+
+  const generateResumePack = async () => {
+    if (!selectedJob) return
+    try {
+      setResumePack({ status: 'working' })
+      const res = await authFetch(`/api/v1/jobs/${selectedJob.id}/resume/generate`, { method: 'POST' })
+      const data = await res.json()
+      setResumePack(data)
+    } catch (e) {
+      console.error('Resume generation error:', e)
+      setResumePack({ status: 'error' })
+    }
+  }
+
+  const classifyQueue = async () => {
+    if (!selectedJob) return
+    try {
+      setQueueDecision({ status: 'working' })
+      const res = await authFetch(`/api/v1/jobs/${selectedJob.id}/queue/classify`, { method: 'POST' })
+      const data = await res.json()
+      setQueueDecision(data)
+    } catch (e) {
+      console.error('Queue classification error:', e)
+      setQueueDecision({ status: 'error' })
+    }
+  }
+
+  const runBrowserAutomation = async () => {
+    if (!selectedJob) return
+    try {
+      setBrowserRun({ status: 'working' })
+      const res = await authFetch(`/api/v1/jobs/${selectedJob.id}/browser/execute?auto_submit=false`, { method: 'POST' })
+      const data = await res.json()
+      setBrowserRun(data)
+    } catch (e) {
+      console.error('Browser automation error:', e)
+      setBrowserRun({ status: 'error' })
+    }
+  }
+
+  const runLinkedInEasyApply = async () => {
+    if (!selectedJob) return
+    try {
+      setLinkedinRun({ status: 'working' })
+      const res = await authFetch(`/api/v1/jobs/${selectedJob.id}/apply/linkedin?auto_submit=false`, { method: 'POST' })
+      const data = await res.json()
+      setLinkedinRun(data)
+    } catch (e) {
+      console.error('LinkedIn Easy Apply error:', e)
+      setLinkedinRun({ status: 'error' })
+    }
   }
 
   const getScoreBadge = (score) => {
@@ -219,6 +431,58 @@ function App() {
     return <span className="text-[10px] bg-red-500/10 text-red-500 border border-red-500/30 px-2 py-0.5 rounded-full font-bold">DISCONNECTED</span>
   }
 
+  if (!token) {
+    return (
+      <div className="min-h-screen bg-[#0b0f19] text-gray-200 font-sans flex items-center justify-center p-4">
+        <div className="bg-[#111827] border border-[#1f2937] rounded-2xl w-full max-w-md p-8 shadow-2xl space-y-6">
+          <div className="text-center space-y-2">
+            <div className="bg-blue-600 p-3 rounded-2xl text-white inline-block shadow-lg shadow-blue-500/25">
+              <Cpu className="h-8 w-8" />
+            </div>
+            <h1 className="text-2xl font-bold text-white tracking-tight">JobPilot AI</h1>
+            <p className="text-xs text-gray-400 font-medium">Please enter your credentials to access the platform</p>
+          </div>
+
+          <form onSubmit={handleLogin} className="space-y-4">
+            {loginError && (
+              <div className="bg-red-500/10 border border-red-500/20 text-red-400 text-xs py-2.5 px-3 rounded-lg text-center font-semibold">
+                {loginError}
+              </div>
+            )}
+            <div className="space-y-1">
+              <label className="text-[10px] uppercase font-bold text-gray-500 tracking-wider">Username</label>
+              <input
+                type="text"
+                value={loginForm.username}
+                onChange={e => setLoginForm(prev => ({ ...prev, username: e.target.value }))}
+                placeholder="admin"
+                className="w-full bg-[#161b26] border border-[#1f2937] rounded-xl px-4 py-2.5 text-sm text-gray-200 placeholder-gray-700 focus:outline-none focus:border-blue-500"
+                required
+              />
+            </div>
+            <div className="space-y-1">
+              <label className="text-[10px] uppercase font-bold text-gray-500 tracking-wider">Password</label>
+              <input
+                type="password"
+                value={loginForm.password}
+                onChange={e => setLoginForm(prev => ({ ...prev, password: e.target.value }))}
+                placeholder="••••••••••••"
+                className="w-full bg-[#161b26] border border-[#1f2937] rounded-xl px-4 py-2.5 text-sm text-gray-200 placeholder-gray-700 focus:outline-none focus:border-blue-500"
+                required
+              />
+            </div>
+            <button
+              type="submit"
+              className="w-full py-3 bg-blue-600 hover:bg-blue-500 text-white text-sm font-bold rounded-xl transition-all shadow-lg shadow-blue-500/20 mt-2"
+            >
+              Sign In
+            </button>
+          </form>
+        </div>
+      </div>
+    )
+  }
+
   return (
     <div className="min-h-screen bg-[#0b0f19] text-gray-200 font-sans selection:bg-blue-600 selection:text-white pb-10">
       
@@ -234,7 +498,7 @@ function App() {
               <p className="text-xs text-gray-500 font-medium">Autonomous Multi-Agent Recruiter</p>
             </div>
           </div>
-
+ 
           {/* Sockets Connection Status Panel */}
           <div className="flex flex-wrap items-center gap-3 text-xs bg-[#161b26] px-4 py-2 rounded-xl border border-gray-800">
             <div className="flex items-center gap-2 pr-3 border-r border-gray-800">
@@ -245,10 +509,16 @@ function App() {
               <span className="text-gray-500 font-medium">System Socket:</span>
               {getSocketStatusBadge(socketsState.system)}
             </div>
-            <div className="flex items-center gap-2">
+            <div className="flex items-center gap-2 pr-3 border-r border-gray-800">
               <span className="text-gray-500 font-medium">Events Socket:</span>
               {getSocketStatusBadge(socketsState.events)}
             </div>
+            <button
+              onClick={handleLogout}
+              className="text-red-400 hover:text-red-300 font-bold hover:underline"
+            >
+              Sign Out
+            </button>
           </div>
         </div>
       </header>
@@ -332,6 +602,7 @@ function App() {
               className="bg-[#161b26] border border-[#1f2937] rounded-lg px-3 py-2 text-sm text-gray-300 focus:outline-none focus:border-blue-500/60"
             >
               <option value="match_score">Sort: Match Score</option>
+              <option value="jd_ats_score">Sort: ATS Score</option>
               <option value="posted_date">Sort: Posted Date</option>
               <option value="created_at">Sort: Discovered</option>
             </select>
@@ -397,8 +668,13 @@ function App() {
 
                     <div className="flex justify-between items-center text-[10px] text-gray-600 pt-2 border-t border-gray-800/50">
                       <span>{job.salary || 'Salary N/A'}</span>
-                      <span>{job.employment_type || 'Full-time'}</span>
+                      <span>{job.jd_ats_score ? `ATS ${Math.round(job.jd_ats_score)}` : (job.employment_type || 'Full-time')}</span>
                     </div>
+                    {job.jd_summary && (
+                      <p className="text-xs text-gray-400 leading-relaxed line-clamp-3">
+                        {job.jd_summary}
+                      </p>
+                    )}
                   </div>
                 )
               })}
@@ -406,8 +682,7 @@ function App() {
           )}
 
           {/* Pagination */}
-          {jobs.pages > 1 && (
-            <div className="flex items-center justify-center gap-4 mt-8">
+          <div className="flex items-center justify-center gap-4 mt-8">
               <button
                 onClick={() => setJobPage(p => Math.max(1, p - 1))}
                 disabled={jobPage <= 1}
@@ -441,36 +716,388 @@ function App() {
                 <X className="h-5 w-5" />
               </button>
             </div>
+            {/* Tab Headers */}
+            <div className="flex border-b border-[#1f2937] px-6 text-xs font-bold text-gray-500 uppercase tracking-wider">
+              <button 
+                onClick={() => setModalTab('overview')} 
+                className={`pb-3 pt-4 px-4 border-b-2 transition-colors ${modalTab === 'overview' ? 'text-blue-500 border-blue-500 font-bold' : 'border-transparent hover:text-gray-300'}`}
+              >
+                Overview
+              </button>
+              <button 
+                onClick={() => setModalTab('analysis')} 
+                className={`pb-3 pt-4 px-4 border-b-2 transition-colors flex items-center gap-1.5 ${modalTab === 'analysis' ? 'text-blue-500 border-blue-500 font-bold' : 'border-transparent hover:text-gray-300'}`}
+              >
+                <Cpu className="h-3.5 w-3.5" /> AI Analysis
+              </button>
+              <button 
+                onClick={() => setModalTab('package')} 
+                className={`pb-3 pt-4 px-4 border-b-2 transition-colors flex items-center gap-1.5 ${modalTab === 'package' ? 'text-blue-500 border-blue-500 font-bold' : 'border-transparent hover:text-gray-300'}`}
+              >
+                <Briefcase className="h-3.5 w-3.5" /> App Package
+              </button>
+              <button 
+                onClick={() => setModalTab('description')} 
+                className={`pb-3 pt-4 px-4 border-b-2 transition-colors ${modalTab === 'description' ? 'text-blue-500 border-b-2 border-blue-500 font-bold' : 'border-transparent hover:text-gray-300'}`}
+              >
+                Description
+              </button>
+            </div>
+
             <div className="px-6 py-5 space-y-4">
-              <div className="grid grid-cols-2 gap-3 text-sm">
-                {[
-                  ['Location', selectedJob.location],
-                  ['Work Mode', selectedJob.work_mode],
-                  ['Employment', selectedJob.employment_type],
-                  ['Salary', selectedJob.salary],
-                  ['Experience', selectedJob.experience],
-                  ['Match Score', `★ ${Math.round(selectedJob.match_score)}`],
-                ].map(([k, v]) => (
-                  <div key={k} className="bg-[#161b26] rounded-lg px-3 py-2">
-                    <p className="text-gray-500 text-[11px] uppercase font-bold mb-0.5">{k}</p>
-                    <p className="text-gray-200 font-medium">{v || 'N/A'}</p>
-                  </div>
-                ))}
-              </div>
-              {selectedJob.skills && (
-                <div>
-                  <p className="text-gray-500 text-xs font-bold uppercase mb-2">Skills</p>
-                  <div className="flex flex-wrap gap-1.5">
-                    {selectedJob.skills.split(',').map(s => (
-                      <span key={s} className="text-xs bg-blue-500/10 text-blue-400 border border-blue-500/20 px-2 py-0.5 rounded-full">{s.trim()}</span>
+              {modalTab === 'overview' && (
+                <>
+                  <div className="grid grid-cols-2 gap-3 text-sm">
+                    {[
+                      ['Location', selectedJob.location],
+                      ['Work Mode', selectedJob.work_mode],
+                      ['Employment', selectedJob.employment_type],
+                      ['Salary', selectedJob.salary],
+                      ['Experience', selectedJob.experience],
+                      ['Match Score', `★ ${Math.round(selectedJob.match_score)}`],
+                      ['JD ATS Score', selectedJob.jd_ats_score ? `★ ${Math.round(selectedJob.jd_ats_score)}` : 'N/A'],
+                    ].map(([k, v]) => (
+                      <div key={k} className="bg-[#161b26] rounded-lg px-3 py-2">
+                        <p className="text-gray-500 text-[11px] uppercase font-bold mb-0.5">{k}</p>
+                        <p className="text-gray-200 font-medium">{v || 'N/A'}</p>
+                      </div>
                     ))}
                   </div>
+
+                  {selectedJob.jd_summary && (
+                    <div>
+                      <p className="text-gray-500 text-xs font-bold uppercase mb-2">JD Summary</p>
+                      <p className="text-gray-300 text-sm leading-relaxed whitespace-pre-wrap">{selectedJob.jd_summary}</p>
+                    </div>
+                  )}
+
+                  {selectedJob.jd_keywords?.length > 0 && (
+                    <div>
+                      <p className="text-gray-500 text-xs font-bold uppercase mb-2">Mandatory Skills</p>
+                      <div className="flex flex-wrap gap-1.5">
+                        {Array.isArray(selectedJob.jd_keywords) ? (
+                          selectedJob.jd_keywords.map((item, idx) => (
+                            <span key={`${item}-${idx}`} className="text-xs bg-green-500/10 text-green-300 border border-green-500/20 px-2 py-0.5 rounded-full">
+                              {item}
+                            </span>
+                          ))
+                        ) : (
+                          selectedJob.jd_keywords.split(',').map((item, idx) => (
+                            <span key={`${item}-${idx}`} className="text-xs bg-green-500/10 text-green-300 border border-green-500/20 px-2 py-0.5 rounded-full">
+                              {item.trim()}
+                            </span>
+                          ))
+                        )}
+                      </div>
+                    </div>
+                  )}
+
+                  {selectedJob.skills && (
+                    <div>
+                      <p className="text-gray-500 text-xs font-bold uppercase mb-2">Raw Scraped Skills</p>
+                      <div className="flex flex-wrap gap-1.5">
+                        {selectedJob.skills.split(',').map(s => (
+                          <span key={s} className="text-xs bg-blue-500/10 text-blue-400 border border-blue-500/20 px-2 py-0.5 rounded-full">{s.trim()}</span>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+                </>
+              )}
+
+              {modalTab === 'description' && (
+                <div>
+                  <p className="text-gray-500 text-xs font-bold uppercase mb-2">Description</p>
+                  <p className="text-gray-300 text-sm leading-relaxed whitespace-pre-wrap">{selectedJob.description}</p>
                 </div>
               )}
-              <div>
-                <p className="text-gray-500 text-xs font-bold uppercase mb-2">Description</p>
-                <p className="text-gray-300 text-sm leading-relaxed whitespace-pre-wrap">{selectedJob.description}</p>
-              </div>
+
+              {modalTab === 'analysis' && (
+                <div className="space-y-4">
+                  {analysisLoading ? (
+                    <div className="flex items-center justify-center h-48 text-gray-500 gap-2">
+                      <RefreshCw className="h-5 w-5 animate-spin" /> Fetching AI Job Analysis…
+                    </div>
+                  ) : jobAnalysis ? (
+                    <>
+                      {/* Analysis Details Panel */}
+                      <div className="bg-[#161b26] p-4 rounded-xl border border-gray-800 space-y-3">
+                        <div className="flex items-center justify-between border-b border-gray-800 pb-2">
+                          <span className="text-gray-400 font-bold text-xs uppercase">Structured Parameters</span>
+                          <span className="text-xs bg-blue-500/10 text-blue-400 border border-blue-500/20 px-2 py-0.5 rounded-full">Confidence: {Math.round(jobAnalysis.confidence * 100)}%</span>
+                        </div>
+                        <div className="grid grid-cols-2 gap-3 text-xs">
+                          <div>
+                            <span className="text-gray-500 block font-semibold">Company</span>
+                            <span className="text-white font-medium">{jobAnalysis.company}</span>
+                          </div>
+                          <div>
+                            <span className="text-gray-500 block font-semibold">Title</span>
+                            <span className="text-white font-medium">{jobAnalysis.title}</span>
+                          </div>
+                          <div>
+                            <span className="text-gray-500 block font-semibold">Work Mode</span>
+                            <span className="text-white font-medium">{jobAnalysis.work_mode}</span>
+                          </div>
+                          <div>
+                            <span className="text-gray-500 block font-semibold">Employment Type</span>
+                            <span className="text-white font-medium">{jobAnalysis.employment_type}</span>
+                          </div>
+                          <div>
+                            <span className="text-gray-500 block font-semibold">Experience Range</span>
+                            <span className="text-white font-medium">
+                              {jobAnalysis.experience?.minimum ?? 0} - {jobAnalysis.experience?.maximum ?? 'N/A'} Years
+                            </span>
+                          </div>
+                          <div>
+                            <span className="text-gray-500 block font-semibold">Interview difficulty</span>
+                            <span className={`font-semibold ${jobAnalysis.interview_difficulty === 'Hard' ? 'text-red-400' : jobAnalysis.interview_difficulty === 'Medium' ? 'text-yellow-400' : 'text-green-400'}`}>{jobAnalysis.interview_difficulty}</span>
+                          </div>
+                        </div>
+                      </div>
+
+                      {/* Top 5 Matches and Top 5 Missing */}
+                      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                        <div className="bg-[#161b26] p-4 rounded-xl border border-gray-800">
+                          <p className="text-gray-400 text-xs font-bold uppercase mb-3 flex items-center gap-1.5 text-green-400 border-b border-gray-800/60 pb-1.5">
+                            ✔ Top 5 Matches
+                          </p>
+                          {jobAnalysis.matches?.length > 0 ? (
+                            <div className="flex flex-wrap gap-1.5">
+                              {jobAnalysis.matches.map((item, idx) => (
+                                <span key={idx} className="text-xs bg-green-500/10 text-green-300 border border-green-500/20 px-2 py-0.5 rounded-full">
+                                  {item}
+                                </span>
+                              ))}
+                            </div>
+                          ) : (
+                            <span className="text-gray-600 text-xs italic">No matching skills found in profile.</span>
+                          )}
+                        </div>
+
+                        <div className="bg-[#161b26] p-4 rounded-xl border border-gray-800">
+                          <p className="text-gray-400 text-xs font-bold uppercase mb-3 flex items-center gap-1.5 text-red-400 border-b border-gray-800/60 pb-1.5">
+                            ✘ Top 5 Missing Skills
+                          </p>
+                          {jobAnalysis.missing?.length > 0 ? (
+                            <div className="flex flex-wrap gap-1.5">
+                              {jobAnalysis.missing.map((item, idx) => (
+                                <span key={idx} className="text-xs bg-red-500/10 text-red-300 border border-red-500/20 px-2 py-0.5 rounded-full">
+                                  {item}
+                                </span>
+                              ))}
+                            </div>
+                          ) : (
+                            <span className="text-green-500 text-xs italic">All required skills met!</span>
+                          )}
+                        </div>
+                      </div>
+
+                      {/* Extracted Responsibilities */}
+                      {jobAnalysis.responsibilities?.length > 0 && (
+                        <div>
+                          <p className="text-gray-500 text-xs font-bold uppercase mb-2">Responsibilities</p>
+                          <ul className="list-disc list-inside text-sm text-gray-300 space-y-1 pl-1">
+                            {jobAnalysis.responsibilities.map((item, idx) => (
+                              <li key={idx}>{item}</li>
+                            ))}
+                          </ul>
+                        </div>
+                      )}
+                    </>
+                  ) : (
+                    <div className="bg-[#161b26] p-6 rounded-xl border border-gray-800 text-center space-y-4">
+                      <Zap className="h-10 w-10 mx-auto text-yellow-500/80 animate-pulse" />
+                      <div>
+                        <p className="text-white font-bold text-sm">No AI Analysis for this Job</p>
+                        <p className="text-gray-500 text-xs mt-1">Run structured JD analysis to extract mandatory skills, experience boundaries, difficulty levels, and matches.</p>
+                      </div>
+                      <button
+                        onClick={() => triggerJobAnalysis(selectedJob.id)}
+                        className="px-5 py-2 bg-blue-600 hover:bg-blue-500 text-white font-semibold text-xs rounded-lg transition-colors inline-block"
+                      >
+                        Execute AI Analysis
+                      </button>
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {modalTab === 'package' && (
+                <div className="space-y-4">
+                  {analysisLoading ? (
+                    <div className="flex items-center justify-center h-48 text-gray-500 gap-2">
+                      <RefreshCw className="h-5 w-5 animate-spin" /> Compiling Application Package…
+                    </div>
+                  ) : appPackage ? (
+                    <>
+                      {/* Overall Confidence Pillar Gauges */}
+                      <div className="bg-[#161b26] p-4 rounded-xl border border-gray-800 space-y-4">
+                        <div className="flex items-center justify-between border-b border-gray-800 pb-2">
+                          <span className="text-gray-400 font-bold text-xs uppercase">Confidence Engine</span>
+                          <span className={`text-xs font-bold border px-2.5 py-0.5 rounded-full ${
+                            appPackage.overall_confidence >= 90.0 ? 'bg-green-500/10 text-green-400 border-green-500/20'
+                            : appPackage.overall_confidence >= 70.0 ? 'bg-yellow-500/10 text-yellow-400 border-yellow-500/20'
+                            : 'bg-red-500/10 text-red-400 border-red-500/20'
+                          }`}>
+                            Overall Score: {Math.round(appPackage.overall_confidence)}% ({appPackage.decision})
+                          </span>
+                        </div>
+                        <div className="grid grid-cols-3 gap-3 text-center">
+                          <div className="bg-[#0b0f19] p-2.5 rounded-lg border border-gray-800/80">
+                            <span className="text-gray-500 text-[10px] font-bold block mb-1 uppercase">Resume Match</span>
+                            <span className="text-sm font-bold text-white">{Math.round(appPackage.resume_score)}%</span>
+                          </div>
+                          <div className="bg-[#0b0f19] p-2.5 rounded-lg border border-gray-800/80">
+                            <span className="text-gray-500 text-[10px] font-bold block mb-1 uppercase">JD Alignment</span>
+                            <span className="text-sm font-bold text-white">{Math.round(appPackage.jd_score)}%</span>
+                          </div>
+                          <div className="bg-[#0b0f19] p-2.5 rounded-lg border border-gray-800/80">
+                            <span className="text-gray-500 text-[10px] font-bold block mb-1 uppercase">ATS Answers</span>
+                            <span className="text-sm font-bold text-white">{Math.round(appPackage.ats_score)}%</span>
+                          </div>
+                        </div>
+                      </div>
+
+                      {/* Recruiter Summary Card */}
+                      <div className="bg-[#161b26] p-4 rounded-xl border border-gray-800 space-y-2">
+                        <span className="text-gray-400 font-bold text-xs uppercase block">Recruiter Pitch Summary</span>
+                        <p className="text-gray-300 text-sm leading-relaxed">{appPackage.summary}</p>
+                      </div>
+
+                      {/* Reasons and Concerns */}
+                      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                        <div className="bg-[#161b26] p-4 rounded-xl border border-gray-800">
+                          <p className="text-gray-400 text-xs font-bold uppercase mb-2 text-green-400">Why Interview Candidate</p>
+                          <ul className="list-disc list-inside text-xs text-gray-300 space-y-1">
+                            {appPackage.matches_reasons?.map((item, idx) => (
+                              <li key={idx}>{item}</li>
+                            ))}
+                          </ul>
+                        </div>
+                        <div className="bg-[#161b26] p-4 rounded-xl border border-gray-800">
+                          <p className="text-gray-400 text-xs font-bold uppercase mb-2 text-red-400">Potential Concerns</p>
+                          <p className="text-xs text-gray-300 leading-relaxed">{appPackage.concerns || 'None'}</p>
+                        </div>
+                      </div>
+
+                      {/* Modular Cover Letter Block */}
+                      <div className="bg-[#161b26] p-4 rounded-xl border border-gray-800 space-y-3">
+                        <span className="text-gray-400 font-bold text-xs uppercase block border-b border-gray-800 pb-1.5">Sectional Cover Letter</span>
+                        <div className="space-y-2.5 text-xs text-gray-300 leading-relaxed font-mono">
+                          <p><span className="text-blue-400 font-bold font-sans uppercase text-[10px] block mb-0.5">[Introduction]</span>{appPackage.cover_letter?.intro}</p>
+                          <p><span className="text-blue-400 font-bold font-sans uppercase text-[10px] block mb-0.5">[Experience Summary]</span>{appPackage.cover_letter?.experience}</p>
+                          <p><span className="text-blue-400 font-bold font-sans uppercase text-[10px] block mb-0.5">[Technical Skills]</span>{appPackage.cover_letter?.skills}</p>
+                          <p><span className="text-blue-400 font-bold font-sans uppercase text-[10px] block mb-0.5">[Motivation & Alignment]</span>{appPackage.cover_letter?.motivation}</p>
+                          <p><span className="text-blue-400 font-bold font-sans uppercase text-[10px] block mb-0.5">[Call to Action]</span>{appPackage.cover_letter?.closing}</p>
+                        </div>
+                      </div>
+
+                      {/* ATS Answers accordion block */}
+                      {Object.keys(appPackage.ats_answers || {}).length > 0 && (
+                        <div className="bg-[#161b26] p-4 rounded-xl border border-gray-800 space-y-3">
+                          <span className="text-gray-400 font-bold text-xs uppercase block border-b border-gray-800 pb-1.5">ATS Knowledge Base Answers</span>
+                          <div className="space-y-3">
+                            {Object.entries(appPackage.ats_answers).map(([q, ans], idx) => (
+                              <div key={idx} className="bg-[#0b0f19] p-3 rounded-lg border border-gray-800/80 space-y-1.5">
+                                <p className="text-white font-bold text-xs">Q: {q}</p>
+                                <p className="text-gray-300 text-xs pl-2 border-l border-blue-500/30 font-mono leading-relaxed">A: {ans}</p>
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+                      )}
+                    </>
+                  ) : (
+                    <div className="bg-[#161b26] p-6 rounded-xl border border-gray-800 text-center space-y-4">
+                      <Zap className="h-10 w-10 mx-auto text-blue-500/80 animate-pulse" />
+                      <div>
+                        <p className="text-white font-bold text-sm">No Application Package Compiled</p>
+                        <p className="text-gray-500 text-xs mt-1">Generate a unified package combining resume selection, sectional cover letters, and semantic ATS answers to calculate overall auto-routing confidence.</p>
+                      </div>
+                      <button
+                        onClick={() => triggerAppPackage(selectedJob.id)}
+                        className="px-5 py-2 bg-blue-600 hover:bg-blue-500 text-white font-semibold text-xs rounded-lg transition-colors inline-block"
+                      >
+                        Generate Application Package
+                      </button>
+                    </div>
+                  )}
+                </div>
+              )}
+
+
+              {resumePack?.job_id === selectedJob.id && resumePack.status === 'ok' && (
+                <div className="bg-green-500/10 border border-green-500/20 rounded-xl p-4 text-sm text-green-300 space-y-2">
+                  <p className="font-bold">Resume Pack Ready</p>
+                  <p>Selected Resume: {resumePack.selected_resume}</p>
+                  <p className="break-all">Tailored Resume: {resumePack.tailored_resume_path}</p>
+                  <p className="break-all">Cover Letter: {resumePack.cover_letter_path}</p>
+                  <p className="text-green-200/90">{resumePack.application_summary}</p>
+                </div>
+              )}
+              {queueDecision?.job_id === selectedJob.id && queueDecision.status === 'ok' && (
+                <div className={`rounded-xl p-4 text-sm space-y-2 border ${queueDecision.decision === 'Apply' ? 'bg-green-500/10 border-green-500/20 text-green-300' : queueDecision.decision === 'Manual Review' ? 'bg-yellow-500/10 border-yellow-500/20 text-yellow-300' : 'bg-red-500/10 border-red-500/20 text-red-300'}`}>
+                  <p className="font-bold">Queue Decision: {queueDecision.decision}</p>
+                  <p>Score: {queueDecision.score}</p>
+                  <p>{queueDecision.reason}</p>
+                </div>
+              )}
+              {browserRun?.job_id === selectedJob.id && browserRun.status && browserRun.status !== 'working' && (
+                <div className={`rounded-xl p-4 text-sm space-y-2 border ${browserRun.submitted ? 'bg-green-500/10 border-green-500/20 text-green-300' : 'bg-blue-500/10 border-blue-500/20 text-blue-300'}`}>
+                  <p className="font-bold">Browser Run: {browserRun.status}</p>
+                  <p>{browserRun.apply_url}</p>
+                  <p>Resume: {browserRun.selected_resume || 'N/A'}</p>
+                  {browserRun.report_path && <p className="break-all">Report: {browserRun.report_path}</p>}
+                  {browserRun.steps?.length > 0 && <p>{browserRun.steps[browserRun.steps.length - 1]}</p>}
+                </div>
+              )}
+              {linkedinRun && (
+                <div className={`rounded-xl p-4 text-sm space-y-2 border ${
+                  linkedinRun.status === 'working' ? 'bg-yellow-500/10 border-yellow-500/20 text-yellow-300 animate-pulse'
+                  : linkedinRun.submitted ? 'bg-green-500/10 border-green-500/20 text-green-300' 
+                  : linkedinRun.status === 'skipped' ? 'bg-gray-500/10 border-gray-500/20 text-gray-400'
+                  : 'bg-blue-500/10 border-blue-500/20 text-blue-300'
+                }`}>
+                  <p className="font-bold">LinkedIn Easy Apply: {linkedinRun.status === 'working' ? 'Processing...' : linkedinRun.status}</p>
+                  {linkedinRun.selected_resume && <p>Resume: {linkedinRun.selected_resume}</p>}
+                  {linkedinRun.report_path && <p className="break-all text-[11px] text-gray-400">Report: {linkedinRun.report_path}</p>}
+                  {linkedinRun.steps?.length > 0 && (
+                    <div className="text-[11px] bg-black/30 p-2 rounded max-h-24 overflow-y-auto space-y-1">
+                      {linkedinRun.steps.map((step, sIdx) => (
+                        <p key={sIdx}>• {step}</p>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              )}
+              <button
+                onClick={generateResumePack}
+                className="flex items-center justify-center gap-2 w-full py-2.5 bg-emerald-600 hover:bg-emerald-500 text-white font-semibold text-sm rounded-xl transition-colors"
+              >
+                Generate Resume Pack
+              </button>
+              <button
+                onClick={classifyQueue}
+                className="flex items-center justify-center gap-2 w-full py-2.5 bg-amber-600 hover:bg-amber-500 text-white font-semibold text-sm rounded-xl transition-colors"
+              >
+                Classify Queue
+              </button>
+              {selectedJob.portal?.toLowerCase() === 'linkedin' && (
+                <button
+                  onClick={runLinkedInEasyApply}
+                  disabled={linkedinRun?.status === 'working'}
+                  className="flex items-center justify-center gap-2 w-full py-2.5 bg-sky-700 hover:bg-sky-600 text-white font-semibold text-sm rounded-xl transition-colors disabled:opacity-50"
+                >
+                  LinkedIn Easy Apply
+                </button>
+              )}
+              <button
+                onClick={runBrowserAutomation}
+                className="flex items-center justify-center gap-2 w-full py-2.5 bg-indigo-600 hover:bg-indigo-500 text-white font-semibold text-sm rounded-xl transition-colors"
+              >
+                Run Browser Flow
+              </button>
               <a
                 href={selectedJob.apply_url}
                 target="_blank"
@@ -601,8 +1228,54 @@ function App() {
         </div>
       </section>
 
+      {/* 2.5 AI Cost & Performance Telemetry Dashboard */}
+      <section className="max-w-7xl mx-auto px-6 mt-6">
+        <div className="bg-[#161b26] border border-[#1f2937] rounded-xl p-5 shadow-sm">
+          <div className="flex items-center justify-between border-b border-gray-800 pb-3 mb-4">
+            <div className="flex items-center gap-2">
+              <Cpu className="h-5 w-5 text-yellow-500" />
+              <h2 className="text-sm font-bold text-white uppercase tracking-wider">AI Intelligence telemetry</h2>
+            </div>
+            <span className="text-xs bg-yellow-500/10 text-yellow-500 font-medium px-2 py-0.5 rounded-full border border-yellow-500/20">Cost aware</span>
+          </div>
+
+          <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-4 text-center">
+            <div className="bg-[#0b0f19] p-4 rounded-xl border border-gray-800/80">
+              <span className="text-gray-500 text-xs font-semibold block mb-1">Today's Calls</span>
+              <span className="text-xl font-bold text-white">{data?.ai_telemetry?.today_calls ?? 0}</span>
+            </div>
+            <div className="bg-[#0b0f19] p-4 rounded-xl border border-gray-800/80">
+              <span className="text-gray-500 text-xs font-semibold block mb-1">Today's Tokens</span>
+              <span className="text-xl font-bold text-white">{data?.ai_telemetry?.today_tokens?.toLocaleString() ?? 0}</span>
+            </div>
+            <div className="bg-[#0b0f19] p-4 rounded-xl border border-gray-800/80">
+              <span className="text-gray-500 text-xs font-semibold block mb-1">Cache Hit Rate</span>
+              <span className="text-xl font-bold text-green-400">{data?.ai_telemetry?.cache_hit_pct ?? 0}%</span>
+            </div>
+            <div className="bg-[#0b0f19] p-4 rounded-xl border border-gray-800/80">
+              <span className="text-gray-500 text-xs font-semibold block mb-1">Money Saved</span>
+              <span className="text-xl font-bold text-emerald-400">${data?.ai_telemetry?.money_saved?.toFixed(4) ?? '0.00'}</span>
+            </div>
+            <div className="bg-[#0b0f19] p-4 rounded-xl border border-gray-800/80">
+              <span className="text-gray-500 text-xs font-semibold block mb-1">Avg Latency</span>
+              <span className="text-xl font-bold text-blue-400">{data?.ai_telemetry?.avg_latency ?? '0.0'} s</span>
+            </div>
+            <div className="bg-[#0b0f19] p-4 rounded-xl border border-gray-800/80 text-left min-w-0">
+              <span className="text-gray-500 text-xs font-semibold block mb-1 text-center">Model / Prompt</span>
+              <div className="text-[10px] text-gray-400 font-semibold truncate" title={data?.ai_telemetry?.active_model}>
+                Model: <span className="text-gray-200">{data?.ai_telemetry?.active_model?.split('/').pop() || 'gemini'}</span>
+              </div>
+              <div className="text-[10px] text-gray-400 font-semibold mt-0.5">
+                Version: <span className="text-gray-200">v{data?.ai_telemetry?.active_version ?? 1}</span>
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
+
       {/* 3. Main Dashboard Content Grid */}
       <main className="max-w-7xl mx-auto px-6 mt-6 grid grid-cols-1 lg:grid-cols-3 gap-6">
+
         
         {/* LEFT COLUMN: Configuration Snapshot & Events Logs */}
         <section className="lg:col-span-1 flex flex-col gap-6">
@@ -617,45 +1290,104 @@ function App() {
               <span className="text-xs bg-green-500/10 text-green-500 font-medium px-2 py-0.5 rounded-full border border-green-500/20">Active</span>
             </div>
 
+            <div className="mb-4 pb-4 border-b border-gray-800/40">
+              <h3 className="text-lg font-bold text-white tracking-tight">{configuration?.full_name || 'Althaf Hussain Syed'}</h3>
+              <p className="text-xs text-blue-400 font-semibold mt-0.5">{configuration?.designation || 'AWS DevOps Engineer'}</p>
+            </div>
+
             <div className="flex flex-col gap-4 text-sm">
               <div className="flex justify-between border-b border-gray-800/40 pb-2">
-                <span className="text-gray-500 font-medium">Expected CTC</span>
-                <span className="font-semibold text-white">{configuration?.expected_ctc || 'N/A'} LPA</span>
-              </div>
-              <div className="flex justify-between border-b border-gray-800/40 pb-2">
-                <span className="text-gray-500 font-medium">Total Experience</span>
+                <span className="text-gray-500 font-medium">Experience</span>
                 <span className="font-semibold text-white">
                   {configuration?.experience_years ? `${configuration.experience_years.toFixed(2)} Years` : '0.00 Years'}
                 </span>
               </div>
               <div className="flex justify-between border-b border-gray-800/40 pb-2">
+                <span className="text-gray-500 font-medium">Expected CTC</span>
+                <span className="font-semibold text-white">{configuration?.expected_ctc || 'N/A'} LPA</span>
+              </div>
+              <div className="flex justify-between border-b border-gray-800/40 pb-2">
                 <span className="text-gray-500 font-medium">Immediate Joiner</span>
                 <span className="font-semibold text-white">{configuration?.immediate_joiner ? "Yes" : "No"}</span>
               </div>
-              <div className="flex flex-col gap-2">
-                <span className="text-gray-500 font-medium">Preferred Locations</span>
-                <div className="flex flex-wrap gap-1.5">
-                  {configuration?.preferred_locations.map((loc, idx) => (
-                    <span key={idx} className="bg-gray-800 text-xs px-2.5 py-1 rounded-md text-gray-300 font-semibold border border-gray-700">
-                      {loc}
-                    </span>
-                  )) || <span className="text-gray-500">None</span>}
-                </div>
+              <div className="flex justify-between border-b border-gray-800/40 pb-2">
+                <span className="text-gray-500 font-medium">Preferred Location</span>
+                <span className="font-semibold text-white truncate max-w-[150px]" title={configuration?.preferred_locations?.join(', ')}>
+                  {configuration?.preferred_locations?.join(', ') || 'N/A'}
+                </span>
+              </div>
+              <div className="flex justify-between border-b border-gray-800/40 pb-2">
+                <span className="text-gray-500 font-medium">Resumes</span>
+                <span className="font-semibold text-purple-400">
+                  {resumes?.length || 0} Loaded
+                </span>
               </div>
               <div className="flex flex-col gap-2 pt-2">
                 <div className="flex justify-between items-center">
-                  <span className="text-gray-500 font-medium">Verified Skills</span>
+                  <span className="text-gray-500 font-medium">Skills</span>
                   <span className="text-xs bg-blue-500/10 text-blue-400 font-semibold px-2 py-0.5 rounded-full border border-blue-500/25">
-                    {configuration?.skills_count} Total
+                    {configuration?.skills_count || 0}
                   </span>
                 </div>
-                <div className="flex flex-wrap gap-1.5 max-h-[140px] overflow-y-auto custom-scrollbar pr-1">
-                  {configuration?.skills_list.map((skill, idx) => (
+                <div className="flex flex-wrap gap-1.5 max-h-[100px] overflow-y-auto custom-scrollbar pr-1">
+                  {configuration?.skills_list?.map((skill, idx) => (
                     <span key={idx} className="bg-[#1c2333] text-xs px-2.5 py-1 rounded-md text-blue-300 border border-blue-900/30">
                       {skill}
                     </span>
                   )) || <span className="text-gray-500">None</span>}
                 </div>
+              </div>
+            </div>
+          </div>
+
+          {/* Card: Auto-Apply Pipeline Controller */}
+          <div className="bg-[#161b26] border border-[#1f2937] rounded-xl p-5 shadow-sm">
+            <div className="flex items-center justify-between border-b border-gray-800 pb-3 mb-4">
+              <div className="flex items-center gap-2">
+                <Cpu className="h-5 w-5 text-indigo-500" />
+                <h2 className="text-sm font-bold text-white uppercase tracking-wider">Auto-Apply Pipeline</h2>
+              </div>
+              <span className={`text-[10px] font-bold border px-2 py-0.5 rounded-full ${
+                pipelineStats?.auto_apply_active ? 'bg-green-500/10 text-green-500 border-green-500/20' 
+                : 'bg-gray-500/10 text-gray-400 border-gray-500/20'
+              }`}>
+                {pipelineStats?.auto_apply_active ? "RUNNING" : "PAUSED"}
+              </span>
+            </div>
+
+            <div className="flex items-center justify-between bg-[#0b0f19] p-3 rounded-lg border border-gray-800 mb-4">
+              <div>
+                <span className="text-xs text-white font-bold block">Autonomous Mode</span>
+                <span className="text-[10px] text-gray-500 block mt-0.5">Applies to jobs &gt;90% score</span>
+              </div>
+              <button
+                onClick={() => togglePipeline(!pipelineStats?.auto_apply_active)}
+                className={`px-4 py-1.5 rounded-lg text-xs font-bold transition-all ${
+                  pipelineStats?.auto_apply_active 
+                    ? 'bg-red-950/40 text-red-400 border border-red-900/30 hover:bg-red-900/20' 
+                    : 'bg-green-600 hover:bg-green-500 text-white shadow-md shadow-green-500/10'
+                }`}
+              >
+                {pipelineStats?.auto_apply_active ? "Pause" : "Start"}
+              </button>
+            </div>
+
+            <div className="grid grid-cols-2 gap-2 text-center text-xs font-semibold">
+              <div className="bg-[#0b0f19] p-2 rounded border border-gray-800/80">
+                <span className="text-gray-500 text-[10px] block mb-0.5">PROCESSED</span>
+                <span className="text-sm text-white font-bold">{pipelineStats?.processed ?? 0}</span>
+              </div>
+              <div className="bg-[#0b0f19] p-2 rounded border border-gray-800/80">
+                <span className="text-emerald-500 text-[10px] block mb-0.5">AUTO-APPLIED</span>
+                <span className="text-sm text-emerald-400 font-bold">{pipelineStats?.applied ?? 0}</span>
+              </div>
+              <div className="bg-[#0b0f19] p-2 rounded border border-gray-800/80">
+                <span className="text-red-400 text-[10px] block mb-0.5">SKIPPED</span>
+                <span className="text-sm text-red-400 font-bold">{pipelineStats?.skipped ?? 0}</span>
+              </div>
+              <div className="bg-[#0b0f19] p-2 rounded border border-gray-800/80">
+                <span className="text-yellow-500 text-[10px] block mb-0.5">REVIEW QUEUE</span>
+                <span className="text-sm text-yellow-400 font-bold">{pipelineStats?.manual_review ?? 0}</span>
               </div>
             </div>
           </div>
@@ -898,7 +1630,7 @@ function App() {
           <span>Commit Hash: <strong className="text-gray-400 font-semibold">{system?.git_commit || 'N/A'}</strong></span>
         </div>
         <div>
-          <span>Platform Version: <strong className="text-gray-400 font-semibold">0.5.0 (Sprint 2.1 Job Discovery)</strong></span>
+          <span>Platform Version: <strong className="text-gray-400 font-semibold">0.5.4 (Sprint 2.5 Browser Automation)</strong></span>
         </div>
       </footer>
 
